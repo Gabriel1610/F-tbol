@@ -1,9 +1,13 @@
 import mysql.connector
 import logging
+from datetime import datetime
+import os # IMPORTANTE: Para encontrar el certificado
 from mysql.connector import errorcode
 # Importamos Argon2 para el hashing moderno
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+
+PUNTOS = 3
 
 # Configuración del Logger
 logging.basicConfig(level=logging.INFO)
@@ -12,18 +16,28 @@ logger = logging.getLogger(__name__)
 class BaseDeDatos:
     def __init__(self):
         # Inicializamos el Hasher de Argon2
-        # time_cost, memory_cost y parallelism se configuran por defecto a valores seguros
         self.ph = PasswordHasher()
+
+        # --- SOLUCIÓN DEL ERROR SSL ---
+        # Calculamos la ruta absoluta del archivo .pem para que Python lo encuentre sí o sí
+        carpeta_actual = os.path.dirname(os.path.abspath(__file__))
+        ruta_certificado = os.path.join(carpeta_actual, "isrgrootx1.pem")
+        
+        # Verificamos si el archivo existe (opcional, ayuda a depurar)
+        if not os.path.exists(ruta_certificado):
+            logger.error(f"NO SE ENCUENTRA EL CERTIFICADO EN: {ruta_certificado}")
 
         # Configuración para TiDB Cloud
         self.config = {
             'user': '3XY8PLHt12tsDbZ.root',       
-            'password': 'TU_CONTRASEÑA_AQUI',     # <--- RECUERDA PONER TU CLAVE DE TiDB
+            'password': 'mXv9F5VQGmRiYYZH',     # <--- ¡RECUERDA VOLVER A PEGAR TU CONTRASEÑA REAL AQUÍ!
             'host': 'gateway01.us-east-1.prod.aws.tidbcloud.com', 
             'port': 4000,                         
             'database': 'independiente',          
             'raise_on_warnings': True,
-            'ssl_ca': 'isrgrootx1.pem',           
+            
+            # Pasamos la ruta completa del certificado
+            'ssl_ca': ruta_certificado,           
             'ssl_verify_cert': True
         }
 
@@ -35,17 +49,80 @@ class BaseDeDatos:
         except mysql.connector.Error as err:
             if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
                 logger.error("Usuario o contraseña de BD incorrectos.")
-                raise Exception("Error de autenticación con la Base de Datos.")
+                raise Exception("Error de autenticación con la Base de Datos. Revise usuario y contraseña.")
             elif err.errno == errorcode.ER_BAD_DB_ERROR:
                 logger.error("La base de datos no existe.")
                 raise Exception("La Base de Datos especificada no existe.")
             else:
-                logger.error(f"Error de conexión: {err}")
-                raise Exception("No se pudo conectar al servidor de Base de Datos.")
+                # Mostramos el error técnico en la consola para depurar
+                logger.error(f"Error de conexión detallado: {err}")
+                
+                # Mensaje amigable para el usuario
+                if "SSL" in str(err):
+                    raise Exception("Error de seguridad SSL. No se encuentra el certificado 'isrgrootx1.pem'.")
+                else:
+                    raise Exception("No se pudo conectar al servidor. Verifique su internet.")
+
+    def obtener_ranking(self):
+        """
+        Calcula el ranking directamente en la Base de Datos.
+        Utiliza la constante PUNTOS definida al inicio del archivo.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor() 
+
+            # CAMBIOS IMPORTANTES:
+            # 1. Usamos COALESCE(SUM(...), 0) para que devuelva 0 en lugar de None si no hay puntos.
+            # 2. Usamos LEFT JOIN para traer a TODOS los usuarios, tengan o no predicciones.
+            # 3. La condición "goles_independiente IS NOT NULL" se mueve al ON del JOIN. 
+            #    Esto evita filtrar a los usuarios que no tienen partidos jugados aun.
+            
+            sql = f"""
+            SELECT 
+                u.username,
+                
+                -- Columna 2: Puntos Totales
+                COALESCE(SUM(
+                    (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END) +
+                    (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                    (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END)
+                ), 0) AS total,
+
+                -- Columna 3: Puntos por Ganador
+                COALESCE(SUM(CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END), 0) AS pts_ganador,
+
+                -- Columna 4: Puntos por Goles Independiente
+                COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END), 0) AS pts_cai,
+
+                -- Columna 5: Puntos por Goles Rival
+                COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival
+
+            FROM usuarios u
+            LEFT JOIN pronosticos pr ON u.id = pr.usuario_id
+            -- Aquí está el truco: Filtramos que el partido se haya jugado EN EL JOIN, no en el WHERE
+            LEFT JOIN partidos p ON pr.partido_id = p.id AND p.goles_independiente IS NOT NULL
+            
+            GROUP BY u.id, u.username
+            ORDER BY total DESC;
+            """
+            
+            cursor.execute(sql)
+            resultados = cursor.fetchall()
+            return resultados
+
+        except Exception as e:
+            logger.error(f"Error calculando ranking en BD: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
 
     def insertar_usuario(self, username, password):
         """
-        Hashea la contraseña con Argon2 antes de guardarla.
+        Hashea la contraseña con Argon2 y guarda fecha local del sistema.
         """
         conexion = None
         cursor = None
@@ -53,18 +130,22 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            # --- HASHING MODERNO (Argon2) ---
-            # Esto genera un string que incluye el algoritmo, el costo, la sal y el hash.
-            # Ejemplo: $argon2id$v=19$m=65536,t=3,p=4$KBd...$d9...
+            # Hashing
             password_hash = self.ph.hash(password)
 
-            sql = "INSERT INTO usuarios (username, password) VALUES (%s, %s)"
-            valores = (username, password_hash)
+            # Obtenemos la hora actual de TU sistema (Argentina)
+            fecha_actual = datetime.now()
+
+            # Modificamos la consulta para incluir fecha_registro explícitamente
+            sql = "INSERT INTO usuarios (username, password, fecha_registro) VALUES (%s, %s, %s)"
+            
+            # Pasamos fecha_actual como tercer valor
+            valores = (username, password_hash, fecha_actual)
 
             cursor.execute(sql, valores)
             conexion.commit()
             
-            logger.info(f"Usuario '{username}' registrado exitosamente.")
+            logger.info(f"Usuario '{username}' registrado exitosamente el {fecha_actual}.")
             return True
 
         except mysql.connector.IntegrityError as err:
@@ -95,7 +176,6 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor(dictionary=True)
             
-            # Obtenemos el hash guardado (que ya incluye la sal)
             sql = "SELECT password FROM usuarios WHERE username = %s"
             cursor.execute(sql, (username,))
             usuario = cursor.fetchone()
@@ -103,16 +183,11 @@ class BaseDeDatos:
             if usuario:
                 hash_guardado = usuario['password']
                 try:
-                    # Argon2 verifica si el password coincide con el hash guardado
-                    # Si coincide, devuelve True (o el hash si es necesario actualizarlo)
-                    # Si NO coincide, lanza una excepción VerifyMismatchError
                     self.ph.verify(hash_guardado, password)
                     return True
                 except VerifyMismatchError:
-                    # La contraseña es incorrecta
                     return False
             
-            # Si no se encuentra el usuario
             return False
             
         except Exception as e:

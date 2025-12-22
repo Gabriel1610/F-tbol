@@ -1,12 +1,15 @@
 import flet as ft
+import time # Importamos time para dar un micro respiro a la UI
 from estilos import Estilos
 from base_de_datos import BaseDeDatos
 from ventana_mensaje import GestorMensajes
+from ventana_carga import VentanaCarga # <--- IMPORTAMOS LA NUEVA CLASE
 
 class TarjetaAcceso(ft.Container):
-    def __init__(self, page: ft.Page):
+    def __init__(self, page: ft.Page, on_login_success):
         super().__init__()
         self.page_principal = page
+        self.on_login_success = on_login_success 
         
         self.width = 500
         self.padding = 40
@@ -62,20 +65,15 @@ class TarjetaAcceso(ft.Container):
         )
 
         # --- BOTONES ---
-        # CORRECCIÓN: Usamos diccionarios de estados para los colores
-        
-        # 1. Botón Registrarse (Borde)
         self.btn_reg = ft.OutlinedButton(
             text="Registrarse", 
             width=140, 
             disabled=True,
             style=ft.ButtonStyle(
-                # Color del texto: Gris si disabled, Blanco si normal
                 color={
                     ft.ControlState.DISABLED: "grey",
                     ft.ControlState.DEFAULT: Estilos.COLOR_BLANCO
                 },
-                # Borde: Gris si disabled, Blanco si normal
                 side={
                     ft.ControlState.DISABLED: ft.BorderSide(2, "grey"),
                     ft.ControlState.DEFAULT: ft.BorderSide(2, Estilos.COLOR_BLANCO)
@@ -84,18 +82,15 @@ class TarjetaAcceso(ft.Container):
             on_click=self._registrar
         )
         
-        # 2. Botón Ingresar (Relleno)
         self.btn_ing = ft.ElevatedButton(
             text="Ingresar", 
             width=140, 
             disabled=True,
             style=ft.ButtonStyle(
-                # Color de fondo: Gris si disabled, Blanco si normal
                 bgcolor={
                     ft.ControlState.DISABLED: "grey",
                     ft.ControlState.DEFAULT: Estilos.COLOR_BLANCO
                 },
-                # Color del texto: Negro si disabled (para contraste), Rojo si normal
                 color={
                     ft.ControlState.DISABLED: "black",
                     ft.ControlState.DEFAULT: Estilos.COLOR_ROJO_CAI
@@ -119,9 +114,8 @@ class TarjetaAcceso(ft.Container):
             spacing=15
         )
 
-    # --- LÓGICA DE VALIDACIÓN EN CASCADA (REGISTRO) ---
+    # --- VALIDACIONES (Sin cambios) ---
     def _validar_registro(self, e):
-        # 1. Usuario -> Pass 1
         if not self.user_reg.value:
             self.pass_reg.value = ""
             self.pass_reg.disabled = True
@@ -131,7 +125,6 @@ class TarjetaAcceso(ft.Container):
         else:
             self.pass_reg.disabled = False
 
-        # 2. Pass 1 -> Pass 2
         if not self.pass_reg.value or self.pass_reg.disabled:
             self.pass_rep.value = ""
             self.pass_rep.disabled = True
@@ -139,17 +132,13 @@ class TarjetaAcceso(ft.Container):
         else:
             self.pass_rep.disabled = False
 
-        # 3. Pass 2 -> Botón
         if self.pass_rep.value and not self.pass_rep.disabled:
             self.btn_reg.disabled = False
         else:
             self.btn_reg.disabled = True
-
         self.update()
 
-    # --- LÓGICA DE VALIDACIÓN EN CASCADA (INGRESO) ---
     def _validar_ingreso(self, e):
-        # 1. Usuario -> Pass
         if not self.user_ing.value:
             self.pass_ing.value = ""
             self.pass_ing.disabled = True
@@ -157,53 +146,72 @@ class TarjetaAcceso(ft.Container):
         else:
             self.pass_ing.disabled = False
 
-        # 2. Pass -> Botón
         if self.pass_ing.value and not self.pass_ing.disabled:
             self.btn_ing.disabled = False
         else:
             self.btn_ing.disabled = True
-
         self.update()
 
+    # --- LOGICA CON VENTANA DE CARGA ---
     def _registrar(self, e):
         usuario = self.user_reg.value.strip()
         contra1 = self.pass_reg.value
         contra2 = self.pass_rep.value
         
-        if not usuario or not contra1 or not contra2:
-            return 
+        if not usuario or not contra1 or not contra2: return 
 
         if contra1 != contra2:
-            mensaje_error = (
-                "Las contraseñas no coinciden.\n\n"
-                "Recuerde que el sistema distingue entre mayúsculas y minúsculas."
-            )
-            GestorMensajes.mostrar(self.page_principal, "Error de Contraseña", mensaje_error, "error")
+            mensaje = "Las contraseñas no coinciden.\nRecuerde distinguir mayúsculas y minúsculas."
+            GestorMensajes.mostrar(self.page_principal, "Error de Contraseña", mensaje, "error")
             return
 
         try:
-            self.db.insertar_usuario(usuario, contra1)
-            GestorMensajes.mostrar(self.page_principal, "Registro Exitoso", f"Usuario {usuario} creado.", "exito")
+            # 1. MOSTRAR CARGA
+            VentanaCarga.mostrar(self.page_principal, "Registrando usuario...")
             
-            # Reset
+            # Pequeña pausa técnica para asegurar que la ventana se dibuje antes de que la BD congele el proceso
+            time.sleep(0.1) 
+
+            # 2. OPERACIÓN PESADA
+            self.db.insertar_usuario(usuario, contra1)
+            
+            # (El finally se encarga de cerrar la carga aquí)
+            
+            GestorMensajes.mostrar(self.page_principal, "Registro Exitoso", f"Usuario {usuario} creado.", "exito")
             self.user_reg.value = ""
             self._validar_registro(None)
-            
+
         except Exception as error:
             GestorMensajes.mostrar(self.page_principal, "Error de Registro", str(error), "error")
+        
+        finally:
+            # 3. CERRAR CARGA SIEMPRE (Haya error o no)
+            VentanaCarga.cerrar(self.page_principal)
 
     def _ingresar(self, e):
         usuario = self.user_ing.value.strip()
         password = self.pass_ing.value
         
-        if not usuario or not password:
-             return
+        if not usuario or not password: return
 
         try:
+            # 1. MOSTRAR CARGA
+            VentanaCarga.mostrar(self.page_principal, "Iniciando sesión...")
+            time.sleep(0.1)
+
+            # 2. OPERACIÓN PESADA
             exito = self.db.validar_usuario(usuario, password)
+            
+            # IMPORTANTE: Cerramos la carga ANTES de cambiar de pantalla o mostrar error
+            VentanaCarga.cerrar(self.page_principal) 
+
             if exito:
-                GestorMensajes.mostrar(self.page_principal, "Bienvenido", f"Hola {usuario}, acceso concedido.", "exito")
+                if self.on_login_success:
+                    self.on_login_success(usuario)
             else:
                 GestorMensajes.mostrar(self.page_principal, "Acceso Denegado", "Usuario o contraseña incorrectos.", "error")
+        
         except Exception as error:
-             GestorMensajes.mostrar(self.page_principal, "Error de Sistema", str(error), "error")
+            # Si hubo error, nos aseguramos de cerrar la carga también
+            VentanaCarga.cerrar(self.page_principal)
+            GestorMensajes.mostrar(self.page_principal, "Error de Sistema", str(error), "error")
