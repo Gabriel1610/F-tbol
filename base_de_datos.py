@@ -1,7 +1,9 @@
 import mysql.connector
 import logging
-import hashlib
 from mysql.connector import errorcode
+# Importamos Argon2 para el hashing moderno
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 
 # Configuración del Logger
 logging.basicConfig(level=logging.INFO)
@@ -9,18 +11,18 @@ logger = logging.getLogger(__name__)
 
 class BaseDeDatos:
     def __init__(self):
-        # Configuración para TiDB Cloud (Extraída de tus capturas)
+        # Inicializamos el Hasher de Argon2
+        # time_cost, memory_cost y parallelism se configuran por defecto a valores seguros
+        self.ph = PasswordHasher()
+
+        # Configuración para TiDB Cloud
         self.config = {
-            'user': '3XY8PLHt12tsDbZ.root',       # Tu usuario del Cluster0
-            'password': 'TU_CONTRASEÑA_AQUI',     # <--- Escribe aquí tu contraseña real
-            'host': 'gateway01.us-east-1.prod.aws.tidbcloud.com', # Host de AWS
-            'port': 4000,                         # TiDB usa el puerto 4000 (no el 3306)
-            'database': 'independiente',          # Nombre de la BD según tu captura
+            'user': '3XY8PLHt12tsDbZ.root',       
+            'password': 'TU_CONTRASEÑA_AQUI',     # <--- RECUERDA PONER TU CLAVE DE TiDB
+            'host': 'gateway01.us-east-1.prod.aws.tidbcloud.com', 
+            'port': 4000,                         
+            'database': 'independiente',          
             'raise_on_warnings': True,
-            
-            # --- SEGURIDAD SSL (OBLIGATORIO) ---
-            # TiDB requiere conexión segura. Asegúrate de tener el archivo .pem 
-            # descargado en la misma carpeta del proyecto.
             'ssl_ca': 'isrgrootx1.pem',           
             'ssl_verify_cert': True
         }
@@ -39,13 +41,11 @@ class BaseDeDatos:
                 raise Exception("La Base de Datos especificada no existe.")
             else:
                 logger.error(f"Error de conexión: {err}")
-                raise Exception("No se pudo conectar al servidor de Base de Datos. Verifique su conexión.")
+                raise Exception("No se pudo conectar al servidor de Base de Datos.")
 
     def insertar_usuario(self, username, password):
         """
-        Inserta un nuevo usuario en la tabla.
-        Retorna True si fue exitoso.
-        Lanza excepciones específicas si falla.
+        Hashea la contraseña con Argon2 antes de guardarla.
         """
         conexion = None
         cursor = None
@@ -53,9 +53,10 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            # 1. Hashear la contraseña (Seguridad básica)
-            # Usamos SHA-256 para no guardar texto plano
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            # --- HASHING MODERNO (Argon2) ---
+            # Esto genera un string que incluye el algoritmo, el costo, la sal y el hash.
+            # Ejemplo: $argon2id$v=19$m=65536,t=3,p=4$KBd...$d9...
+            password_hash = self.ph.hash(password)
 
             sql = "INSERT INTO usuarios (username, password) VALUES (%s, %s)"
             valores = (username, password_hash)
@@ -67,8 +68,7 @@ class BaseDeDatos:
             return True
 
         except mysql.connector.IntegrityError as err:
-            # Capturamos error de duplicados (username UNIQUE)
-            if err.errno == 1062: # Código de error para Duplicate Entry
+            if err.errno == 1062: 
                 logger.warning(f"Intento de registro duplicado para: {username}")
                 raise Exception("El nombre de usuario ya existe. Por favor elija otro.")
             else:
@@ -79,7 +79,6 @@ class BaseDeDatos:
             raise Exception("Ocurrió un error interno al intentar guardar los datos.")
             
         except Exception as e:
-            # Re-lanzar la excepción genérica (conexión, etc) para que la UI la capture
             raise e
             
         finally:
@@ -87,21 +86,33 @@ class BaseDeDatos:
             if conexion: conexion.close()
 
     def validar_usuario(self, username, password):
-        """Función extra para el Login (Ingreso)"""
+        """
+        Verifica la contraseña usando Argon2.
+        """
         conexion = None
         cursor = None
         try:
             conexion = self.abrir()
             cursor = conexion.cursor(dictionary=True)
             
+            # Obtenemos el hash guardado (que ya incluye la sal)
             sql = "SELECT password FROM usuarios WHERE username = %s"
             cursor.execute(sql, (username,))
             usuario = cursor.fetchone()
             
             if usuario:
-                hash_ingresado = hashlib.sha256(password.encode()).hexdigest()
-                if hash_ingresado == usuario['password']:
+                hash_guardado = usuario['password']
+                try:
+                    # Argon2 verifica si el password coincide con el hash guardado
+                    # Si coincide, devuelve True (o el hash si es necesario actualizarlo)
+                    # Si NO coincide, lanza una excepción VerifyMismatchError
+                    self.ph.verify(hash_guardado, password)
                     return True
+                except VerifyMismatchError:
+                    # La contraseña es incorrecta
+                    return False
+            
+            # Si no se encuentra el usuario
             return False
             
         except Exception as e:

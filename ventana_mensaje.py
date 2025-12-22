@@ -10,42 +10,28 @@ class GestorMensajes:
         Tipos: 'info', 'error', 'exito'
         """
         
-        # Definir iconos y colores según el tipo
+        # --- 1. Definición de Iconos y Colores (Igual que antes) ---
         if tipo == "error":
-            icono = ft.icons.ERROR_OUTLINE
+            icono = "error_outline"
             color_icono = Estilos.COLOR_ROJO_CAI
             titulo_color = Estilos.COLOR_ROJO_CAI
         elif tipo == "exito":
-            icono = ft.icons.CHECK_CIRCLE_OUTLINE
-            color_icono = "green" # Verde para éxito, aunque no sea CAI, es estándar visual
+            icono = "check_circle_outline"
+            color_icono = "green" 
             titulo_color = Estilos.COLOR_BLANCO
         else:
-            icono = ft.icons.INFO_OUTLINE
+            icono = "info_outline"
             color_icono = Estilos.COLOR_BLANCO
             titulo_color = Estilos.COLOR_BLANCO
 
-        # Creamos el contenido del diálogo
-        contenido = ft.Column(
-            tight=True,
-            controls=[
-                ft.Row(
-                    controls=[
-                        ft.Icon(icono, color=color_icono, size=40),
-                        ft.Text(titulo, size=20, weight=ft.FontWeight.BOLD, color=titulo_color)
-                    ],
-                    alignment=ft.MainAxisAlignment.START,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER
-                ),
-                ft.Divider(color="grey"),
-                ft.Text(mensaje, size=16, color=Estilos.COLOR_BLANCO)
-            ]
-        )
+        # Declaramos la variable 'dialogo' antes
+        dialogo = None
 
         def cerrar_dialogo(e):
-            dialogo.open = False
-            page.update()
+            if dialogo:
+                page.close(dialogo)
 
-        # Botón de acción
+        # --- 2. Crear el Botón (Lo definimos antes para usarlo en el contenido) ---
         boton = ft.ElevatedButton(
             text="Aceptar",
             style=ft.ButtonStyle(
@@ -55,24 +41,55 @@ class GestorMensajes:
             on_click=cerrar_dialogo
         )
 
-        # Crear el diálogo
+        # --- 3. Creamos el contenido del diálogo (Estructura modificada) ---
+        contenido = ft.Column(
+            tight=True, # Se ajusta al contenido
+            controls=[
+                # Fila del Título e Icono
+                ft.Row(
+                    controls=[
+                        ft.Icon(icono, color=color_icono, size=40),
+                        ft.Text(titulo, size=20, weight=ft.FontWeight.BOLD, color=titulo_color)
+                    ],
+                    alignment=ft.MainAxisAlignment.START,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER
+                ),
+                ft.Divider(color="grey"),
+                # Texto del mensaje
+                ft.Text(mensaje, size=16, color=Estilos.COLOR_BLANCO),
+                
+                # Espaciador vertical
+                ft.Container(height=20),
+                
+                # --- CAMBIO CLAVE: El botón ahora es parte del contenido ---
+                # Lo metemos en una Row para alinearlo a la derecha
+                ft.Row(
+                    controls=[boton],
+                    alignment=ft.MainAxisAlignment.END # Alineado a la derecha
+                )
+            ]
+        )
+
+
+        # --- 4. Crear el diálogo ---
         dialogo = ft.AlertDialog(
             modal=True,
             title_padding=0,
-            content_padding=20,
+            content_padding=0, # Quitamos padding externo del contenido
+            
+            # El contenido principal es nuestro contenedor oscuro
             content=ft.Container(
                 content=contenido,
-                width=400,
-                # Usamos un gris muy oscuro (casi negro) para el fondo del popup
-                bgcolor="#2d2d2d", 
-                border_radius=10,
-                padding=10
+                width=450, # Aumentamos un poco el ancho (antes 400)
+                bgcolor="#2d2d2d", # Color de fondo del recuadro
+                border_radius=15,
+                padding=25 # Padding interno del recuadro
             ),
-            actions=[boton],
-            actions_alignment=ft.MainAxisAlignment.END,
-            bgcolor=ft.colors.TRANSPARENT, # Hacemos transparente el fondo nativo para usar nuestro Container
+            
+            # --- CAMBIO CLAVE: Eliminamos 'actions' y 'actions_alignment' ---
+            # actions=[boton],  <-- ESTO SE ELIMINÓ
+            
+            bgcolor="transparent", # El fondo del diálogo nativo es transparente
         )
 
-        page.dialog = dialogo
-        dialogo.open = True
-        page.update()
+        page.open(dialogo)

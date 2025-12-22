@@ -14,27 +14,24 @@ class SistemaIndependiente:
     def _configurar_ventana(self):
         self.page.title = "Sistema Club Atlético Independiente"
         
-        # Configuración del Ícono
         carpeta_actual = os.path.dirname(os.path.abspath(__file__))
         ruta_icono = os.path.join(carpeta_actual, NOMBRE_ICONO)
         self.page.window.icon = ruta_icono
         
-        # Estilos de la Ventana Principal
         self.page.theme_mode = ft.ThemeMode.DARK 
         self.page.bgcolor = "#121212" 
         self.page.padding = 0
         
-        # Comportamiento de ventana
         self.page.window.maximized = True
         self.page.update()
         
-        # Alineación global
         self.page.vertical_alignment = ft.MainAxisAlignment.CENTER
         self.page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
 
     def _construir_interfaz(self):
-        # Instanciamos el componente importado
-        self.tarjeta = TarjetaAcceso()
+        # --- AQUÍ ESTÁ EL CAMBIO ---
+        # Le pasamos 'self.page' a la tarjeta para que pueda mostrar alertas
+        self.tarjeta = TarjetaAcceso(self.page)
 
         self.btn_salir = ft.IconButton(
             icon="close",
