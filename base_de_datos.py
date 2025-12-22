@@ -166,6 +166,41 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
+    def obtener_partidos(self):
+        """
+        Obtiene la lista de partidos ordenados por fecha descendente.
+        Realiza JOINs con ediciones, campeonatos y anios para formar el nombre del torneo.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            # Usamos CONCAT para unir el nombre del campeonato y el año (ej: "Apertura 2026")
+            sql = """
+            SELECT 
+                p.rival,
+                p.fecha_hora,
+                CONCAT(c.nombre, ' ', a.numero) as torneo_completo
+            FROM partidos p
+            JOIN ediciones e ON p.edicion_id = e.id
+            JOIN campeonatos c ON e.campeonato_id = c.id
+            JOIN anios a ON e.anio_id = a.id
+            ORDER BY p.fecha_hora DESC
+            """
+            
+            cursor.execute(sql)
+            resultados = cursor.fetchall()
+            return resultados
+
+        except Exception as e:
+            logger.error(f"Error obteniendo partidos: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
     def validar_usuario(self, username, password):
         """
         Verifica la contraseña usando Argon2.
