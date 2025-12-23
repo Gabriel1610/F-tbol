@@ -67,7 +67,9 @@ class SistemaIndependiente:
         self.txt_fecha_display.value = "---"
         self.txt_hora_display.value = "---"
         self.date_picker.value = None
-        # self.time_picker.value = None  <-- LÍNEA ELIMINADA POR ERROR DE FLET
+        
+        # Forzamos validación para que deshabilite los goles (al no haber fecha)
+        self._actualizar_estado_goles() # <--- NUEVA LLAMADA
         
         if self.fila_partido_ref:
             self.fila_partido_ref.selected = False
@@ -80,8 +82,47 @@ class SistemaIndependiente:
         
         self.page.update()
 
+    def _actualizar_estado_goles(self):
+        """
+        Habilita o deshabilita los inputs de goles según la fecha y hora.
+        Reglas: Deshabilitar si es futuro, si no tiene fecha/hora, o si la hora es 00:00.
+        """
+        deshabilitar = False
+        
+        fecha = self.date_picker.value
+        hora = self.time_picker.value
+        
+        # 1. Sin fecha seleccionada
+        if not fecha:
+            deshabilitar = True
+        
+        # 2. Sin horario (texto '---') o hora 00:00:00
+        elif self.txt_hora_display.value == "---" or (hora and hora.hour == 0 and hora.minute == 0):
+            deshabilitar = True
+            
+        # 3. Fecha en el futuro
+        else:
+            # Combinamos para comparar con ahora
+            # Si hora es None (caso raro si pasó el check de '---'), usamos min
+            hora_ref = hora if hora else datetime.min.time()
+            fecha_hora = datetime.combine(fecha, hora_ref)
+            
+            if fecha_hora > datetime.now():
+                deshabilitar = True
+
+        # Aplicar estado a los inputs
+        self.input_goles_cai.disabled = deshabilitar
+        self.input_goles_rival.disabled = deshabilitar
+        
+        # Si se deshabilitan, limpiamos los valores para evitar confusiones
+        if deshabilitar:
+            self.input_goles_cai.value = ""
+            self.input_goles_rival.value = ""
+            
+        self.page.update()
+
     def _seleccionar_partido(self, e):
-        # --- VALIDACIÓN DE SEGURIDAD (NUEVO) ---
+        # --- VALIDACIÓN DE SEGURIDAD ---
         if self.cargando_datos or self.procesando_form:
             GestorMensajes.mostrar(self.page, "Espere", "Se están actualizando las tablas, aguarde un momento...", "info")
             return
@@ -95,7 +136,7 @@ class SistemaIndependiente:
             except: pass
 
         fila.selected = True
-        fila.color = ft.Colors.with_opacity(0.5, Estilos.COLOR_ROJO_CAI)
+        fila.color = ft.colors.with_opacity(0.5, Estilos.COLOR_ROJO_CAI)
         
         self.fila_partido_ref = fila
         
@@ -112,6 +153,9 @@ class SistemaIndependiente:
         
         self.input_goles_cai.value = str(datos['goles_cai']) if datos['goles_cai'] is not None else ""
         self.input_goles_rival.value = str(datos['goles_rival']) if datos['goles_rival'] is not None else ""
+        
+        # Validamos si se pueden editar los goles según la fecha cargada
+        self._actualizar_estado_goles() # <--- NUEVA LLAMADA
         
         self.page.update()
 
@@ -204,7 +248,25 @@ class SistemaIndependiente:
 
         self.tabla_estadisticas = ft.DataTable(width=600, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=60, column_spacing=15, columns=[ft.DataColumn(ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), numeric=True), ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Text("Puntos\nTotales", color="yellow", weight=ft.FontWeight.BOLD), numeric=True), ft.DataColumn(ft.Text("Pts.\nGanador", color="white"), numeric=True), ft.DataColumn(ft.Text("Pts.\nGoles CAI", color="white"), numeric=True), ft.DataColumn(ft.Text("Pts.\nGoles Rival", color="white"), numeric=True)], rows=[])
         self.tabla_partidos = ft.DataTable(width=450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=60, column_spacing=20, columns=[ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left))], rows=[])
-        self.tabla_partidos_admin = ft.DataTable(width=450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=60, column_spacing=20, show_checkbox_column=False, columns=[ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left))], rows=[])
+        self.tabla_partidos_admin = ft.DataTable(
+            width=500,
+            bgcolor="#2D2D2D", 
+            border=ft.border.all(1, "white10"), 
+            border_radius=8, 
+            vertical_lines=ft.border.BorderSide(1, "white10"), 
+            horizontal_lines=ft.border.BorderSide(1, "white10"), 
+            heading_row_color="black", 
+            heading_row_height=70, 
+            data_row_max_height=60, 
+            column_spacing=20, 
+            show_checkbox_column=False, 
+            columns=[
+                ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left)), 
+                ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), 
+                ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=190, alignment=ft.alignment.center_left))
+            ], 
+            rows=[]
+        )
         self.tabla_torneos = ft.DataTable(width=450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=60, data_row_max_height=50, column_spacing=20, show_checkbox_column=False, columns=[ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Año", color="yellow", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center_left), numeric=True)], rows=[])
 
         self.loading = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=True)
@@ -530,16 +592,17 @@ class SistemaIndependiente:
         threading.Thread(target=_tarea, daemon=True).start()
 
     def _fecha_cambiada(self, e):
-        """Actualiza el texto con la fecha seleccionada"""
+        """Actualiza el texto con la fecha seleccionada y valida goles"""
         if self.date_picker.value:
             self.txt_fecha_display.value = self.date_picker.value.strftime("%d/%m/%Y")
+            self._actualizar_estado_goles() # <--- NUEVA LLAMADA
             self.page.update()
 
     def _hora_cambiada(self, e):
-        """Actualiza el texto con la hora seleccionada"""
+        """Actualiza el texto con la hora seleccionada y valida goles"""
         if self.time_picker.value:
-            # TimePicker devuelve objeto time, formateamos a HH:MM
             self.txt_hora_display.value = self.time_picker.value.strftime("%H:%M")
+            self._actualizar_estado_goles() # <--- NUEVA LLAMADA
             self.page.update()
 
     def _seleccionar_torneo(self, e):
