@@ -4,6 +4,7 @@ import shutil
 import time
 import stat
 import datetime
+import mysql.connector # <--- NUEVO: Necesario para encontrar la carpeta de idiomas
 
 # --- CONFIGURACIÓN DEL PROYECTO ---
 NOMBRE_ARCHIVO = 'Independiente'  # Nombre del script principal (sin .py)
@@ -31,14 +32,12 @@ def limpiar_pyinstaller():
         except Exception:
             pass
 
-    # Borrar archivo .spec
     if os.path.exists(RUTA_SPEC):
         try:
             os.remove(RUTA_SPEC)
         except PermissionError:
             print(f"Advertencia: No se pudo borrar {RUTA_SPEC} (está en uso).")
 
-    # Borrar carpeta dist
     if os.path.exists(RUTA_DIST):
         try:
             shutil.rmtree(RUTA_DIST, onerror=on_rm_error)
@@ -46,7 +45,6 @@ def limpiar_pyinstaller():
             print(f"Advertencia: No se pudo eliminar la carpeta 'dist'. Razón: {e}")
             print(f">> Asegúrate de cerrar '{NOMBRE_ARCHIVO}.exe' antes de compilar.")
 
-    # Borrar carpeta build
     if os.path.exists(RUTA_BUILD):
         try:
             shutil.rmtree(RUTA_BUILD, onerror=on_rm_error)
@@ -73,7 +71,15 @@ def ejecutar_pyinstaller():
     print(f"\nEjecutando PyInstaller sobre: {ruta_script_principal}")
     print("Esto puede tardar unos minutos...\n")
 
-    # Comprobación de archivos necesarios
+    # --- SOLUCIÓN ERROR LOCALIZATION ---
+    # Buscamos dónde está instalada la librería mysql.connector en tu PC
+    ruta_libreria_mysql = os.path.dirname(mysql.connector.__file__)
+    # Buscamos la carpeta 'locales' dentro de ella
+    ruta_locales = os.path.join(ruta_libreria_mysql, 'locales')
+    
+    if not os.path.exists(ruta_locales):
+        print("ADVERTENCIA: No se encontró la carpeta 'locales' de mysql-connector.")
+
     if not os.path.exists(RUTA_ICONO_ABS):
         print(f"ADVERTENCIA: No se encuentra el ícono {NOMBRE_ICONO}")
     if not os.path.exists(RUTA_SSL_ABS):
@@ -82,23 +88,25 @@ def ejecutar_pyinstaller():
 
     comando = [
         "pyinstaller", 
-        "--noconsole",          # Sin consola negra de fondo
-        "--onefile",            # Todo en un solo archivo .exe
+        "--noconsole",          
+        "--onefile",            
         f"--name={NOMBRE_ARCHIVO}",
         f"--icon={RUTA_ICONO_ABS}",
         
         # --- ARCHIVOS ADJUNTOS (DATA) ---
-        # Sintaxis Windows: "origen;destino"
-        # El destino "." significa la raíz temporal donde corre el exe
-        f"--add-data={RUTA_SSL_ABS};.",   # Incluir Certificado SSL
-        f"--add-data={RUTA_ICONO_ABS};.", # Incluir Ícono como recurso
+        f"--add-data={RUTA_SSL_ABS};.",   # Certificado SSL
+        f"--add-data={RUTA_ICONO_ABS};.", # Ícono
+        
+        # --- SOLUCIÓN: INCLUIR CARPETA LOCALES ---
+        # Sintaxis: "ruta_origen;ruta_destino_en_el_exe"
+        f"--add-data={ruta_locales};mysql/connector/locales",
         
         # --- IMPORTACIONES OCULTAS ---
-        # Flet y Argon2 a veces no son detectados automáticamente
         "--hidden-import=flet",
         "--hidden-import=mysql.connector",
         "--hidden-import=argon2",
         "--hidden-import=datetime",
+        "--hidden-import=mysql.connector.locales.eng.client_error", # Forzamos importación específica
         
         ruta_script_principal
     ]
@@ -119,7 +127,6 @@ def ejecutar_pyinstaller():
         return True
     else:
         print("\n>> ERROR EN PYINSTALLER:")
-        # Mostramos solo las últimas lineas del error para no saturar
         print(resultado.stderr[-2000:]) 
         return False
 
@@ -128,7 +135,6 @@ def mover_y_limpiar():
     exe_origen = os.path.join(RUTA_DIST, f"{NOMBRE_ARCHIVO}.exe")
     exe_destino = os.path.join(DIRECTORIO_BASE, f"{NOMBRE_ARCHIVO}.exe")
 
-    # Si existe un exe viejo, lo borramos
     if os.path.exists(exe_destino):
         try:
             os.remove(exe_destino)
@@ -142,7 +148,6 @@ def mover_y_limpiar():
         
         time.sleep(1)
         
-        # Limpiar carpetas generadas
         shutil.rmtree(RUTA_DIST, ignore_errors=True)
         shutil.rmtree(RUTA_BUILD, ignore_errors=True)
         if os.path.exists(RUTA_SPEC):
