@@ -81,14 +81,13 @@ class SistemaIndependiente:
         self.page.update()
 
     def _seleccionar_partido(self, e):
-        # --- VALIDACIÓN DE SEGURIDAD ---
-        # Si la tabla está deshabilitada (procesando algo), ignoramos el clic.
-        if self.tabla_partidos_admin.disabled:
+        # --- VALIDACIÓN DE SEGURIDAD (NUEVO) ---
+        if self.cargando_datos or self.procesando_form:
+            GestorMensajes.mostrar(self.page, "Espere", "Se están actualizando las tablas, aguarde un momento...", "info")
             return
 
         fila = e.control
         
-        # Gestión visual
         if self.fila_partido_ref and self.fila_partido_ref != fila:
             self.fila_partido_ref.selected = False
             self.fila_partido_ref.color = None
@@ -100,11 +99,9 @@ class SistemaIndependiente:
         
         self.fila_partido_ref = fila
         
-        # Recuperamos el diccionario con TODOS los datos
         datos = fila.data 
         self.partido_seleccionado_id = datos['id']
         
-        # Cargar formulario
         self.input_rival.value = datos['rival']
         
         if datos['fecha']:
@@ -139,41 +136,38 @@ class SistemaIndependiente:
         threading.Thread(target=_tarea, daemon=True).start()
 
     def _bloquear_ui_torneos(self, ocupado: bool):
-        """Habilita o deshabilita los controles del formulario de Torneos"""
-        # Inputs
+        """Bloquea UI y setea bandera de procesamiento"""
+        self.procesando_form = ocupado # FLAG LÓGICO
+        
+        # Inputs y Botones
         self.input_torneo_nombre.disabled = ocupado
         self.dd_torneo_anio.disabled = ocupado
-        
-        # Botones
         self.btn_add_torneo.disabled = ocupado
         self.btn_edit_torneo.disabled = ocupado
         self.btn_del_torneo.disabled = ocupado
         self.btn_clean_torneo.disabled = ocupado
         
-        # Tabla (Esto impide seleccionar nuevas filas)
-        self.tabla_torneos.disabled = ocupado
+        # NOTA: NO deshabilitamos la tabla self.tabla_torneos.disabled = ...
+        # para que pueda recibir el clic y mostrar la advertencia.
         
         self.page.update()
 
     def _bloquear_ui_partidos(self, ocupado: bool):
-        """Habilita o deshabilita los controles del formulario de Partidos"""
-        # Inputs
+        """Bloquea UI y setea bandera de procesamiento"""
+        self.procesando_form = ocupado # FLAG LÓGICO
+        
+        # Inputs y Botones
         self.input_rival.disabled = ocupado
         self.input_goles_cai.disabled = ocupado
         self.input_goles_rival.disabled = ocupado
-        
-        # Botones de fecha/hora
         self.btn_pick_date.disabled = ocupado
         self.btn_pick_time.disabled = ocupado
-        
-        # Botones de acción
         self.btn_add_partido.disabled = ocupado
         self.btn_edit_partido.disabled = ocupado
         self.btn_del_partido.disabled = ocupado
         self.btn_clean_partido.disabled = ocupado
         
-        # Tabla (Impide clickear otra fila mientras se procesa)
-        self.tabla_partidos_admin.disabled = ocupado
+        # NOTA: NO deshabilitamos la tabla aquí tampoco.
         
         self.page.update()
 
@@ -182,18 +176,24 @@ class SistemaIndependiente:
         self.page.controls.clear()
         self.page.bgcolor = Estilos.COLOR_ROJO_CAI
         
-        # Variables de estado
+        # --- BANDERAS DE ESTADO (NUEVO) ---
+        self.cargando_datos = False      # True durante _cargar_datos_async
+        self.procesando_form = False     # True durante agregar/editar/eliminar
+        
+        # Variables de selección
         self.edicion_seleccionada_id = None
         self.fila_seleccionada_ref = None
         self.partido_seleccionado_id = None
         self.fila_partido_ref = None
+        
+        # ... (Resto de inicialización de Selectores, Appbar y Tablas IGUAL que antes) ...
+        # (Asegúrate de que las tablas NO tengan 'disabled=True')
         
         # Inicializar Selectores
         self.date_picker = ft.DatePicker(on_change=self._fecha_cambiada, confirm_text="Seleccionar", cancel_text="Cancelar")
         self.time_picker = ft.TimePicker(on_change=self._hora_cambiada, confirm_text="Seleccionar", cancel_text="Cancelar")
         self.page.overlay.extend([self.date_picker, self.time_picker])
 
-        # Barra Superior
         self.page.appbar = ft.AppBar(
             leading=ft.Icon(ft.Icons.SECURITY, color=Estilos.COLOR_ROJO_CAI),
             leading_width=40,
@@ -202,7 +202,6 @@ class SistemaIndependiente:
             actions=[ft.IconButton(icon=ft.Icons.LOGOUT, tooltip="Cerrar Sesión", icon_color=Estilos.COLOR_ROJO_CAI, on_click=self._cerrar_sesion), ft.Container(width=10)]
         )
 
-        # --- TABLAS ---
         self.tabla_estadisticas = ft.DataTable(width=600, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=60, column_spacing=15, columns=[ft.DataColumn(ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), numeric=True), ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Text("Puntos\nTotales", color="yellow", weight=ft.FontWeight.BOLD), numeric=True), ft.DataColumn(ft.Text("Pts.\nGanador", color="white"), numeric=True), ft.DataColumn(ft.Text("Pts.\nGoles CAI", color="white"), numeric=True), ft.DataColumn(ft.Text("Pts.\nGoles Rival", color="white"), numeric=True)], rows=[])
         self.tabla_partidos = ft.DataTable(width=450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=60, column_spacing=20, columns=[ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left))], rows=[])
         self.tabla_partidos_admin = ft.DataTable(width=450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=60, column_spacing=20, show_checkbox_column=False, columns=[ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left))], rows=[])
@@ -217,11 +216,9 @@ class SistemaIndependiente:
         self.input_goles_cai = ft.TextField(width=60, height=40, content_padding=10, bgcolor="#2D2D2D", border_color="white24", color="white", keyboard_type=ft.KeyboardType.NUMBER, input_filter=ft.InputFilter(allow=True, regex_string=r"[0-9]", replacement_string=""))
         self.input_goles_rival = ft.TextField(width=60, height=40, content_padding=10, bgcolor="#2D2D2D", border_color="white24", color="white", keyboard_type=ft.KeyboardType.NUMBER, input_filter=ft.InputFilter(allow=True, regex_string=r"[0-9]", replacement_string=""))
 
-        # BOTONES PICKERS (Guardamos referencia para bloquearlos)
         self.btn_pick_date = ft.IconButton(icon=ft.Icons.CALENDAR_MONTH, icon_color="yellow", tooltip="Elegir Fecha", on_click=lambda _: self.page.open(self.date_picker))
         self.btn_pick_time = ft.IconButton(icon=ft.Icons.ACCESS_TIME, icon_color="yellow", tooltip="Elegir Hora", on_click=lambda _: self.page.open(self.time_picker))
 
-        # BOTONES ACCIONES PARTIDOS
         self.btn_add_partido = ft.IconButton(icon=ft.Icons.ADD_CIRCLE, icon_color="green", tooltip="Agregar Partido", on_click=self._agregar_partido, icon_size=40)
         self.btn_edit_partido = ft.IconButton(icon=ft.Icons.EDIT, icon_color="blue", tooltip="Editar Partido", on_click=self._editar_partido)
         self.btn_del_partido = ft.IconButton(icon=ft.Icons.DELETE, icon_color="red", tooltip="Eliminar Partido", on_click=self._eliminar_partido)
@@ -233,7 +230,6 @@ class SistemaIndependiente:
         self.dd_torneo_anio = ft.Dropdown(width=120, content_padding=5, text_size=14, bgcolor="#2D2D2D", border_color="white24", color="white", options=[ft.dropdown.Option(str(a)) for a in anios_disponibles])
         if len(anios_disponibles) == 1: self.dd_torneo_anio.value = str(anios_disponibles[0])
 
-        # BOTONES ACCIONES TORNEOS
         self.btn_add_torneo = ft.IconButton(icon=ft.Icons.ADD_CIRCLE, icon_color="green", tooltip="Agregar Nuevo", on_click=self._agregar_torneo, icon_size=40)
         self.btn_edit_torneo = ft.IconButton(icon=ft.Icons.EDIT, icon_color="blue", tooltip="Editar Seleccionado", on_click=self._editar_torneo)
         self.btn_del_torneo = ft.IconButton(icon=ft.Icons.DELETE, icon_color="red", tooltip="Eliminar Seleccionado", on_click=self._eliminar_torneo)
@@ -261,7 +257,6 @@ class SistemaIndependiente:
                                     content=ft.Row(
                                         vertical_alignment=ft.CrossAxisAlignment.START,
                                         controls=[
-                                            # COLUMNA IZQUIERDA
                                             ft.Column(
                                                 controls=[
                                                     ft.Text("Partidos Registrados", size=20, weight=ft.FontWeight.BOLD, color="white"),
@@ -272,11 +267,9 @@ class SistemaIndependiente:
                                                 ]
                                             ),
                                             ft.Container(width=30), 
-
-                                            # COLUMNA DERECHA: FORMULARIOS
                                             ft.Column(
                                                 controls=[
-                                                    # FORM 1: PARTIDOS (ANCHO AUMENTADO A 450)
+                                                    # FORM 1: PARTIDOS
                                                     ft.Container(
                                                         width=450, padding=20, border=ft.border.all(1, "white24"), border_radius=10, bgcolor="#1E1E1E",
                                                         content=ft.Column(tight=True, spacing=15, controls=[
@@ -284,39 +277,14 @@ class SistemaIndependiente:
                                                             ft.Divider(color="white24"),
                                                             ft.Text("1. Seleccione un Torneo en la tabla inferior", size=12, italic=True, color="yellow"),
                                                             ft.Row(controls=[ft.Text("Rival:", width=60, color="white", weight=ft.FontWeight.BOLD), self.input_rival], alignment=ft.MainAxisAlignment.START),
-                                                            
-                                                            ft.Row(
-                                                                controls=[
-                                                                    ft.Text("Fecha:", width=50, color="white", weight=ft.FontWeight.BOLD), 
-                                                                    self.btn_pick_date, 
-                                                                    self.txt_fecha_display, 
-                                                                    ft.Container(width=10), 
-                                                                    ft.Text("Hora:", width=45, color="white", weight=ft.FontWeight.BOLD), 
-                                                                    self.btn_pick_time, 
-                                                                    self.txt_hora_display
-                                                                ], 
-                                                                alignment=ft.MainAxisAlignment.START
-                                                            ),
-                                                            
+                                                            ft.Row(controls=[ft.Text("Fecha:", width=50, color="white", weight=ft.FontWeight.BOLD), self.btn_pick_date, self.txt_fecha_display, ft.Container(width=10), ft.Text("Hora:", width=45, color="white", weight=ft.FontWeight.BOLD), self.btn_pick_time, self.txt_hora_display], alignment=ft.MainAxisAlignment.START),
                                                             ft.Row(controls=[ft.Text("Goles CAI:", width=80, color="white", weight=ft.FontWeight.BOLD), self.input_goles_cai]),
                                                             ft.Row(controls=[ft.Text("Goles Rival:", width=80, color="white", weight=ft.FontWeight.BOLD), self.input_goles_rival]),
                                                             ft.Container(height=10),
-                                                            
-                                                            ft.Row(
-                                                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                                                controls=[
-                                                                    self.btn_add_partido,
-                                                                    ft.Row(spacing=5, controls=[
-                                                                        self.btn_edit_partido,
-                                                                        self.btn_del_partido,
-                                                                        self.btn_clean_partido
-                                                                    ])
-                                                                ]
-                                                            )
+                                                            ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[self.btn_add_partido, ft.Row(spacing=5, controls=[self.btn_edit_partido, self.btn_del_partido, self.btn_clean_partido])])
                                                         ])
                                                     ),
                                                     ft.Container(height=20),
-
                                                     # FORM 2: TORNEOS
                                                     ft.Container(
                                                         width=450, padding=20, border=ft.border.all(1, "white24"), border_radius=10, bgcolor="#1E1E1E",
@@ -325,14 +293,7 @@ class SistemaIndependiente:
                                                             ft.Divider(color="white24"),
                                                             ft.Row(controls=[self.input_torneo_nombre, self.dd_torneo_anio], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                                                             ft.Container(height=10),
-                                                            ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[
-                                                                self.btn_add_torneo,
-                                                                ft.Row(spacing=5, controls=[
-                                                                    self.btn_edit_torneo,
-                                                                    self.btn_del_torneo,
-                                                                    self.btn_clean_torneo
-                                                                ])
-                                                            ])
+                                                            ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[self.btn_add_torneo, ft.Row(spacing=5, controls=[self.btn_edit_torneo, self.btn_del_torneo, self.btn_clean_torneo])])
                                                         ])
                                                     )
                                                 ]
@@ -582,14 +543,14 @@ class SistemaIndependiente:
             self.page.update()
 
     def _seleccionar_torneo(self, e):
-        # --- VALIDACIÓN DE SEGURIDAD ---
-        # Si la tabla está deshabilitada (procesando algo), ignoramos el clic.
-        if self.tabla_torneos.disabled:
+        # --- VALIDACIÓN DE SEGURIDAD (NUEVO) ---
+        if self.cargando_datos or self.procesando_form:
+            GestorMensajes.mostrar(self.page, "Espere", "Se están actualizando las tablas, aguarde un momento...", "info")
             return
 
         fila_cliqueada = e.control
         
-        # 1. Gestión visual (apagar anterior, encender nueva)
+        # 1. Gestión visual
         if self.fila_seleccionada_ref and self.fila_seleccionada_ref != fila_cliqueada:
             self.fila_seleccionada_ref.selected = False
             self.fila_seleccionada_ref.color = None 
@@ -602,10 +563,8 @@ class SistemaIndependiente:
         self.fila_seleccionada_ref = fila_cliqueada
         self.edicion_seleccionada_id = fila_cliqueada.data
 
-        # Cargar datos al formulario
-        # Celda 0: Container -> Text (Nombre)
+        # Cargar datos
         nombre_torneo = fila_cliqueada.cells[0].content.content.value 
-        # Celda 1: Container -> Text (Año)
         anio_torneo = fila_cliqueada.cells[1].content.value
 
         self.input_torneo_nombre.value = nombre_torneo
@@ -614,6 +573,9 @@ class SistemaIndependiente:
         self.page.update()
 
     def _cargar_datos_async(self):
+        # Activamos bandera de carga antes de iniciar el hilo
+        self.cargando_datos = True 
+        
         def _tarea_en_segundo_plano():
             time.sleep(0.5) 
             
@@ -629,17 +591,14 @@ class SistemaIndependiente:
                 datos_partidos = bd.obtener_partidos()
                 datos_ediciones = bd.obtener_ediciones()
 
-                # --- RANKING (Igual) ---
+                # --- PROCESAR DATOS (CÓDIGO IGUAL AL ANTERIOR) ---
                 filas_tabla_ranking = []
                 for i, fila in enumerate(datos_ranking, start=1):
                     filas_tabla_ranking.append(ft.DataRow(cells=[ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")), ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=80, alignment=ft.alignment.center_left)), ft.DataCell(ft.Text(str(fila[1]), weight=ft.FontWeight.BOLD, color="yellow", size=16)), ft.DataCell(ft.Text(str(fila[2]), color="white70")), ft.DataCell(ft.Text(str(fila[3]), color="white70")), ft.DataCell(ft.Text(str(fila[4]), color="white70"))]))
 
-                # --- PARTIDOS ---
                 filas_tabla_partidos = []
                 filas_tabla_admin = [] 
-                
                 for fila in datos_partidos:
-                    # fila ahora trae: (id, rival, fecha, torneo, goles_cai, goles_rival, edicion_id)
                     p_id = fila[0]
                     rival = fila[1]
                     fecha_obj = fila[2]
@@ -647,35 +606,19 @@ class SistemaIndependiente:
                     gc = fila[4]
                     gr = fila[5]
                     ed_id = fila[6]
-                    
                     fecha_str = fecha_obj.strftime("%d/%m/%Y %H:%M") if fecha_obj else "Sin fecha"
 
-                    # 1. Tabla Usuario (Solo lectura)
                     filas_tabla_partidos.append(ft.DataRow(cells=[ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=100, alignment=ft.alignment.center_left)), ft.DataCell(ft.Text(fecha_str, color="white70")), ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left))]))
                     
-                    # 2. Tabla Admin (Con datos ocultos para editar)
                     filas_tabla_admin.append(
                         ft.DataRow(
-                            cells=[
-                                ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=100, alignment=ft.alignment.center_left)), 
-                                ft.DataCell(ft.Text(fecha_str, color="white70")), 
-                                ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left))
-                            ],
-                            # Guardamos TODOS los datos necesarios para editar en un diccionario
-                            data={
-                                'id': p_id,
-                                'rival': rival,
-                                'fecha': fecha_obj,
-                                'goles_cai': gc,
-                                'goles_rival': gr,
-                                'edicion_id': ed_id
-                            },
+                            cells=[ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=100, alignment=ft.alignment.center_left)), ft.DataCell(ft.Text(fecha_str, color="white70")), ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left))],
+                            data={'id': p_id, 'rival': rival, 'fecha': fecha_obj, 'goles_cai': gc, 'goles_rival': gr, 'edicion_id': ed_id},
                             on_select_changed=self._seleccionar_partido,
                             selected=False
                         )
                     )
 
-                # --- TORNEOS (Igual) ---
                 filas_torneos = []
                 for ed in datos_ediciones:
                     ed_id = ed[0]
@@ -688,12 +631,12 @@ class SistemaIndependiente:
                 self.tabla_partidos_admin.rows = filas_tabla_admin
                 self.tabla_torneos.rows = filas_torneos
                 
-                self.loading.visible = False
-                self.page.update()
-                
             except Exception as e:
-                print(f"Error cargando datos en segundo plano: {e}")
+                print(f"Error: {e}")
+            
+            finally:
                 self.loading.visible = False
+                self.cargando_datos = False # LIBERAMOS LA BANDERA
                 self.page.update()
 
         threading.Thread(target=_tarea_en_segundo_plano, daemon=True).start()
