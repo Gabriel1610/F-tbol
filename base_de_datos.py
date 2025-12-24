@@ -161,9 +161,27 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
+    def _obtener_id_rival(self, cursor, nombre_rival):
+        """
+        Método auxiliar: Busca el ID de un rival por su nombre.
+        Si el rival no existe en la tabla 'rivales', lo crea y devuelve el nuevo ID.
+        """
+        # 1. Intentar buscar el ID si ya existe
+        sql_buscar = "SELECT id FROM rivales WHERE nombre = %s"
+        cursor.execute(sql_buscar, (nombre_rival,))
+        resultado = cursor.fetchone()
+        
+        if resultado:
+            return resultado[0] # Retorna el ID existente
+        else:
+            # 2. Si no existe, crearlo
+            sql_crear = "INSERT INTO rivales (nombre) VALUES (%s)"
+            cursor.execute(sql_crear, (nombre_rival,))
+            return cursor.lastrowid # Retorna el ID recién creado
+        
     def obtener_partidos(self):
         """
-        Obtiene la lista de partidos con todos sus datos para la gestión.
+        Obtiene la lista de partidos uniendo con la tabla de rivales.
         """
         conexion = None
         cursor = None
@@ -171,17 +189,21 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            # CAMBIO: Agregamos p.id, p.goles..., p.edicion_id al SELECT
             sql = """
             SELECT 
                 p.id,
-                p.rival,
+                r.nombre,  -- CAMBIO: Traemos el nombre desde la tabla rivales
                 p.fecha_hora,
                 CONCAT(c.nombre, ' ', a.numero) as torneo_completo,
                 p.goles_independiente,
                 p.goles_rival,
-                p.edicion_id
+                p.edicion_id,
+                CASE 
+                    WHEN TIME(p.fecha_hora) = '00:00:00' THEN DATE_FORMAT(p.fecha_hora, '%d/%m/%Y s. h.')
+                    ELSE DATE_FORMAT(p.fecha_hora, '%d/%m/%Y %H:%i')
+                END as fecha_display
             FROM partidos p
+            JOIN rivales r ON p.rival_id = r.id  -- CAMBIO: JOIN con la nueva tabla
             JOIN ediciones e ON p.edicion_id = e.id
             JOIN campeonatos c ON e.campeonato_id = c.id
             JOIN anios a ON e.anio_id = a.id
@@ -201,7 +223,7 @@ class BaseDeDatos:
 
     def editar_partido(self, id_partido, rival, fecha_hora, goles_cai, goles_rival, edicion_id):
         """
-        Actualiza los datos de un partido existente.
+        Actualiza un partido, gestionando el cambio de nombre de rival si es necesario.
         """
         conexion = None
         cursor = None
@@ -209,12 +231,16 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
+            # 1. Obtener el ID del rival (lo busca o lo crea si cambió el nombre)
+            rival_id = self._obtener_id_rival(cursor, rival)
+
+            # 2. Actualizar usando el ID
             sql = """
                 UPDATE partidos 
-                SET rival = %s, fecha_hora = %s, goles_independiente = %s, goles_rival = %s, edicion_id = %s
+                SET rival_id = %s, fecha_hora = %s, goles_independiente = %s, goles_rival = %s, edicion_id = %s
                 WHERE id = %s
             """
-            valores = (rival, fecha_hora, goles_cai, goles_rival, edicion_id, id_partido)
+            valores = (rival_id, fecha_hora, goles_cai, goles_rival, edicion_id, id_partido)
             
             cursor.execute(sql, valores)
             conexion.commit()
@@ -226,7 +252,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-
+            
     def eliminar_partido(self, id_partido):
         """
         Elimina un partido por su ID.
@@ -275,8 +301,7 @@ class BaseDeDatos:
 
     def insertar_partido(self, rival, fecha_hora, goles_cai, goles_rival, edicion_id=1):
         """
-        Inserta un nuevo partido.
-        NOTA: Se usa edicion_id=1 por defecto al no haber selector en la UI.
+        Inserta un nuevo partido gestionando automáticamente el ID del rival.
         """
         conexion = None
         cursor = None
@@ -284,11 +309,15 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
+            # 1. Obtener el ID del rival (lo busca o lo crea)
+            rival_id = self._obtener_id_rival(cursor, rival)
+
+            # 2. Insertar el partido usando el ID
             sql = """
-                INSERT INTO partidos (rival, fecha_hora, goles_independiente, goles_rival, edicion_id)
+                INSERT INTO partidos (rival_id, fecha_hora, goles_independiente, goles_rival, edicion_id)
                 VALUES (%s, %s, %s, %s, %s)
             """
-            valores = (rival, fecha_hora, goles_cai, goles_rival, edicion_id)
+            valores = (rival_id, fecha_hora, goles_cai, goles_rival, edicion_id)
             
             cursor.execute(sql, valores)
             conexion.commit()
