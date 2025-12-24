@@ -787,6 +787,11 @@ class SistemaIndependiente:
 
                 bd = BaseDeDatos()
                 bd.editar_partido(self.partido_seleccionado_id, rival, fecha_hora, gc, gr, self.edicion_seleccionada_id)
+                
+                # --- LIMPIEZA DE RIVALES HUÉRFANOS ---
+                # Si cambiamos el rival, el anterior podría haber quedado sin partidos.
+                bd.eliminar_rivales_huerfanos()
+                
                 GestorMensajes.mostrar(self.page, "Éxito", "Partido modificado.", "exito")
                 self._limpiar_formulario_partido()
                 
@@ -818,6 +823,11 @@ class SistemaIndependiente:
 
                 bd = BaseDeDatos()
                 bd.eliminar_partido(self.partido_seleccionado_id)
+                
+                # --- LIMPIEZA DE RIVALES HUÉRFANOS ---
+                # Al borrar el partido, su rival podría haber quedado sin partidos.
+                bd.eliminar_rivales_huerfanos()
+                
                 GestorMensajes.mostrar(self.page, "Éxito", "Partido eliminado.", "exito")
                 self._limpiar_formulario_partido()
                 
@@ -831,7 +841,7 @@ class SistemaIndependiente:
                 self._bloquear_ui_partidos(False)
 
         threading.Thread(target=_tarea, daemon=True).start()
-
+        
     def _fecha_cambiada(self, e):
         """Actualiza el texto con la fecha seleccionada y valida goles"""
         if self.date_picker.value:

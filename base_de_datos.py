@@ -221,9 +221,10 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    def editar_partido(self, id_partido, rival, fecha_hora, goles_cai, goles_rival, edicion_id):
+    def eliminar_rivales_huerfanos(self):
         """
-        Actualiza un partido, gestionando el cambio de nombre de rival si es necesario.
+        Elimina de la base de datos todos los rivales que no tienen
+        ningún partido asociado.
         """
         conexion = None
         cursor = None
@@ -231,18 +232,84 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            # 1. Obtener el ID del rival (lo busca o lo crea si cambió el nombre)
-            rival_id = self._obtener_id_rival(cursor, rival)
-
-            # 2. Actualizar usando el ID
+            # Usamos una subconsulta: Borrar de rivales SI su ID NO ESTÁ en la lista de rival_id de partidos
             sql = """
-                UPDATE partidos 
-                SET rival_id = %s, fecha_hora = %s, goles_independiente = %s, goles_rival = %s, edicion_id = %s
-                WHERE id = %s
+            DELETE FROM rivales 
+            WHERE id NOT IN (SELECT DISTINCT rival_id FROM partidos)
             """
-            valores = (rival_id, fecha_hora, goles_cai, goles_rival, edicion_id, id_partido)
             
-            cursor.execute(sql, valores)
+            cursor.execute(sql)
+            filas_afectadas = cursor.rowcount
+            conexion.commit()
+            
+            logger.info(f"Se eliminaron {filas_afectadas} rivales huérfanos.")
+            return filas_afectadas
+
+        except Exception as e:
+            logger.error(f"Error eliminando rivales huérfanos: {e}")
+            raise e
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+            
+    def editar_partido(self, id_partido, rival_nombre, fecha_hora, goles_cai, goles_rival, edicion_id):
+        """
+        Actualiza un partido.
+        Lógica de Nombres:
+        - Si el nombre nuevo NO existe: RENOMBRA el rival en la tabla 'rivales' (corrige typos globalmente).
+        - Si el nombre nuevo YA existe: CAMBIA la referencia (rival_id) del partido.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            # 1. Obtener el ID del rival actual del partido
+            cursor.execute("SELECT rival_id FROM partidos WHERE id = %s", (id_partido,))
+            row = cursor.fetchone()
+            if not row:
+                raise Exception("El partido no existe.")
+            rival_id_actual = row[0]
+
+            # 2. Verificar si el nuevo nombre ya existe como otro rival diferente
+            # Buscamos si existe un rival con ese nombre PERO que no sea el mismo ID que ya tenemos
+            sql_check = "SELECT id FROM rivales WHERE nombre = %s AND id != %s"
+            cursor.execute(sql_check, (rival_nombre, rival_id_actual))
+            row_existente = cursor.fetchone()
+
+            if row_existente:
+                # CASO A: El nombre ya existe (ej: Cambiar 'Lanús' por 'Vélez' que ya existe)
+                # No podemos renombrar Lanús a Vélez. Cambiamos la referencia del partido.
+                nuevo_rival_id = row_existente[0]
+                
+                sql = """
+                    UPDATE partidos 
+                    SET rival_id = %s, fecha_hora = %s, goles_independiente = %s, goles_rival = %s, edicion_id = %s
+                    WHERE id = %s
+                """
+                valores = (nuevo_rival_id, fecha_hora, goles_cai, goles_rival, edicion_id, id_partido)
+                cursor.execute(sql, valores)
+                
+            else:
+                # CASO B: El nombre no existe (ej: Corregir 'Racng' a 'Racing')
+                # Aquí MODIFICAMOS el nombre en la tabla rivales.
+                # Esto actualiza el nombre para este partido y todos los demás que jueguen contra este rival.
+                
+                # Paso 1: Renombrar el rival
+                sql_rival = "UPDATE rivales SET nombre = %s WHERE id = %s"
+                cursor.execute(sql_rival, (rival_nombre, rival_id_actual))
+                
+                # Paso 2: Actualizar el resto de datos del partido (fecha, goles, etc.)
+                # Nota: No tocamos rival_id porque sigue siendo el mismo ID, solo cambió su nombre.
+                sql_partido = """
+                    UPDATE partidos 
+                    SET fecha_hora = %s, goles_independiente = %s, goles_rival = %s, edicion_id = %s
+                    WHERE id = %s
+                """
+                valores = (fecha_hora, goles_cai, goles_rival, edicion_id, id_partido)
+                cursor.execute(sql_partido, valores)
+
             conexion.commit()
             return True
 
@@ -252,7 +319,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-            
+
     def eliminar_partido(self, id_partido):
         """
         Elimina un partido por su ID.
