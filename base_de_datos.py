@@ -179,12 +179,13 @@ class BaseDeDatos:
             cursor.execute(sql_crear, (nombre_rival,))
             return cursor.lastrowid # Retorna el ID recién creado
         
-    def obtener_partidos(self, usuario, filtro='todos'):
+    def obtener_partidos(self, usuario, filtro='todos', edicion_id=None):
         """
-        Obtiene la lista de partidos filtrada y ordenada según el estado.
-        Parámetro:
-            usuario (str): Nombre de usuario actual.
-            filtro (str): 'todos' (default), 'jugados' o 'futuros'.
+        Obtiene la lista de partidos filtrada y ordenada.
+        Parámetros:
+            usuario (str): Usuario actual.
+            filtro (str): 'todos', 'jugados', 'futuros', 'torneo', 'sin_pronosticar'.
+            edicion_id (int): ID de la edición (necesario si filtro='torneo').
         """
         conexion = None
         cursor = None
@@ -192,19 +193,26 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            # Lógica de filtrado y ordenamiento
             filtro_sql = ""
-            orden_sql = "DESC" # Por defecto descendente (más reciente arriba)
+            orden_sql = "DESC" 
             
+            # Parametros base para la query (usuario aparece 2 veces en subconsulta)
+            params = [usuario, usuario]
+
             if filtro == 'futuros':
-                # Partidos del futuro -> Orden Ascendente (el más próximo primero)
                 filtro_sql = "WHERE p.fecha_hora > NOW()"
                 orden_sql = "ASC"
             elif filtro == 'jugados':
-                # Partidos del pasado -> Orden Descendente
                 filtro_sql = "WHERE p.fecha_hora <= NOW()"
                 orden_sql = "DESC"
-            # 'todos' no lleva WHERE extra y usa DESC por defecto
+            elif filtro == 'sin_pronosticar':
+                # Futuros Y sin predicción (pred_goles_independiente IS NULL)
+                filtro_sql = "WHERE p.fecha_hora > NOW() AND pr.pred_goles_independiente IS NULL"
+                orden_sql = "ASC"
+            elif filtro == 'torneo' and edicion_id is not None:
+                filtro_sql = "WHERE p.edicion_id = %s"
+                orden_sql = "ASC"
+                params.append(edicion_id)
 
             sql = f"""
             SELECT 
@@ -253,7 +261,7 @@ class BaseDeDatos:
             ORDER BY p.fecha_hora {orden_sql}
             """
             
-            cursor.execute(sql, (usuario, usuario))
+            cursor.execute(sql, tuple(params))
             resultados = cursor.fetchall()
             return resultados
 
