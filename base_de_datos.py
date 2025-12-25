@@ -179,9 +179,12 @@ class BaseDeDatos:
             cursor.execute(sql_crear, (nombre_rival,))
             return cursor.lastrowid # Retorna el ID recién creado
         
-    def obtener_partidos(self):
+    def obtener_partidos(self, usuario, filtro='todos'):
         """
-        Obtiene la lista de partidos uniendo con la tabla de rivales.
+        Obtiene la lista de partidos filtrada y ordenada según el estado.
+        Parámetro:
+            usuario (str): Nombre de usuario actual.
+            filtro (str): 'todos' (default), 'jugados' o 'futuros'.
         """
         conexion = None
         cursor = None
@@ -189,10 +192,24 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            sql = """
+            # Lógica de filtrado y ordenamiento
+            filtro_sql = ""
+            orden_sql = "DESC" # Por defecto descendente (más reciente arriba)
+            
+            if filtro == 'futuros':
+                # Partidos del futuro -> Orden Ascendente (el más próximo primero)
+                filtro_sql = "WHERE p.fecha_hora > NOW()"
+                orden_sql = "ASC"
+            elif filtro == 'jugados':
+                # Partidos del pasado -> Orden Descendente
+                filtro_sql = "WHERE p.fecha_hora <= NOW()"
+                orden_sql = "DESC"
+            # 'todos' no lleva WHERE extra y usa DESC por defecto
+
+            sql = f"""
             SELECT 
                 p.id,
-                r.nombre,  -- CAMBIO: Traemos el nombre desde la tabla rivales
+                r.nombre,
                 p.fecha_hora,
                 CONCAT(c.nombre, ' ', a.numero) as torneo_completo,
                 p.goles_independiente,
@@ -201,16 +218,42 @@ class BaseDeDatos:
                 CASE 
                     WHEN TIME(p.fecha_hora) = '00:00:00' THEN DATE_FORMAT(p.fecha_hora, '%d/%m/%Y s. h.')
                     ELSE DATE_FORMAT(p.fecha_hora, '%d/%m/%Y %H:%i')
-                END as fecha_display
+                END as fecha_display,
+                pr.pred_goles_independiente, 
+                pr.pred_goles_rival,
+                CASE 
+                    WHEN p.goles_independiente IS NULL THEN NULL 
+                    WHEN pr.pred_goles_independiente IS NULL THEN 0 
+                    ELSE
+                        (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
+                END as tus_puntos
             FROM partidos p
-            JOIN rivales r ON p.rival_id = r.id  -- CAMBIO: JOIN con la nueva tabla
+            JOIN rivales r ON p.rival_id = r.id
             JOIN ediciones e ON p.edicion_id = e.id
             JOIN campeonatos c ON e.campeonato_id = c.id
             JOIN anios a ON e.anio_id = a.id
-            ORDER BY p.fecha_hora DESC
+            LEFT JOIN (
+                SELECT 
+                    p1.partido_id, 
+                    p1.pred_goles_independiente, 
+                    p1.pred_goles_rival
+                FROM pronosticos p1
+                INNER JOIN (
+                    SELECT partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    WHERE usuario_id = (SELECT id FROM usuarios WHERE username = %s)
+                    GROUP BY partido_id
+                ) p2 ON p1.partido_id = p2.partido_id AND p1.fecha_prediccion = p2.max_fecha
+                WHERE p1.usuario_id = (SELECT id FROM usuarios WHERE username = %s)
+            ) pr ON p.id = pr.partido_id
+            
+            {filtro_sql}
+            ORDER BY p.fecha_hora {orden_sql}
             """
             
-            cursor.execute(sql)
+            cursor.execute(sql, (usuario, usuario))
             resultados = cursor.fetchall()
             return resultados
 
@@ -251,7 +294,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-            
+
     def editar_partido(self, id_partido, rival_nombre, fecha_hora, goles_cai, goles_rival, edicion_id):
         """
         Actualiza un partido.
@@ -320,6 +363,60 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
+    def obtener_todos_pronosticos(self):
+        """
+        Obtiene el listado completo de pronósticos de todos los usuarios
+        con el cálculo de puntos incluido en la misma consulta.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            # Usamos la constante PUNTOS importada al inicio del archivo
+            sql = f"""
+            SELECT 
+                r.nombre,
+                CASE 
+                    WHEN TIME(p.fecha_hora) = '00:00:00' THEN DATE_FORMAT(p.fecha_hora, '%d/%m/%Y s. h.')
+                    ELSE DATE_FORMAT(p.fecha_hora, '%d/%m/%Y %H:%i')
+                END as fecha_display,
+                CONCAT(c.nombre, ' ', a.numero) as torneo,
+                p.goles_independiente,
+                p.goles_rival,
+                u.username,
+                pr.pred_goles_independiente,
+                pr.pred_goles_rival,
+                -- CÁLCULO DE PUNTOS
+                -- Si el partido no se jugó (goles nulos), los puntos son 0.
+                CASE 
+                    WHEN p.goles_independiente IS NULL THEN 0
+                    ELSE
+                        -- Suma de las 3 condiciones (3 puntos cada una)
+                        (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
+                END as puntos
+            FROM pronosticos pr
+            JOIN partidos p ON pr.partido_id = p.id
+            JOIN usuarios u ON pr.usuario_id = u.id
+            JOIN rivales r ON p.rival_id = r.id
+            JOIN ediciones e ON p.edicion_id = e.id
+            JOIN campeonatos c ON e.campeonato_id = c.id
+            JOIN anios a ON e.anio_id = a.id
+            ORDER BY p.fecha_hora DESC, u.username ASC
+            """
+            
+            cursor.execute(sql)
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error obteniendo pronósticos: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+            
     def eliminar_partido(self, id_partido):
         """
         Elimina un partido por su ID.
