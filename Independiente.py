@@ -219,30 +219,30 @@ class SistemaIndependiente:
         self.page.appbar = ft.AppBar(
             leading=ft.Icon(ft.Icons.SECURITY, color=Estilos.COLOR_ROJO_CAI),
             leading_width=40,
-            # CAMBIO: Coma agregada después de Bienvenido
             title=ft.Text(f"Bienvenido, {usuario}", weight=ft.FontWeight.BOLD, color=Estilos.COLOR_ROJO_CAI),
             center_title=False, bgcolor="white", 
             actions=[ft.IconButton(icon=ft.Icons.LOGOUT, tooltip="Cerrar Sesión", icon_color=Estilos.COLOR_ROJO_CAI, on_click=self._cerrar_sesion), ft.Container(width=10)]
         )
 
-        # --- CONTROLES FORMULARIO PRONÓSTICOS (NUEVO) ---
+        # --- CONTROLES FORMULARIO PRONÓSTICOS ---
+        # CAMBIOS: width ajustado, input_filter removido, on_change agregado
         self.input_pred_cai = ft.TextField(
             label="Goles CAI", 
             width=80, 
             text_align=ft.TextAlign.CENTER,
             keyboard_type=ft.KeyboardType.NUMBER,
-            input_filter=ft.InputFilter(allow=True, regex_string=r"[0-9]", replacement_string=""), 
             max_length=2,
-            bgcolor="#2D2D2D", border_color="white24", color="white"
+            bgcolor="#2D2D2D", border_color="white24", color="white",
+            on_change=self._validar_solo_numeros # Validación manual
         )
         self.input_pred_rival = ft.TextField(
             label="Goles Rival", 
-            width=80, 
+            width=110, # AUMENTADO A 110
             text_align=ft.TextAlign.CENTER,
             keyboard_type=ft.KeyboardType.NUMBER,
-            input_filter=ft.InputFilter(allow=True, regex_string=r"[0-9]", replacement_string=""), 
             max_length=2,
-            bgcolor="#2D2D2D", border_color="white24", color="white"
+            bgcolor="#2D2D2D", border_color="white24", color="white",
+            on_change=self._validar_solo_numeros # Validación manual
         )
         self.btn_pronosticar = ft.ElevatedButton("Pronosticar", icon=ft.Icons.SPORTS_SOCCER, bgcolor="green", color="white", on_click=self._guardar_pronostico)
 
@@ -382,7 +382,7 @@ class SistemaIndependiente:
                 )
             ),
             
-            # Pestaña Partidos (Usuario) - MODIFICADA
+            # Pestaña Partidos (Usuario)
             ft.Tab(
                 text="Partidos", 
                 icon="sports_soccer", 
@@ -533,7 +533,7 @@ class SistemaIndependiente:
                                                         ]
                                                     ),
                                                     ft.Container(width=30), 
-                                                    # Formulario Partidos - ANCHO 380 (CAMBIO SOLICITADO)
+                                                    # Formulario Partidos - ANCHO 380
                                                     ft.Container(
                                                         width=380, padding=20, border=ft.border.all(1, "white24"), border_radius=10, bgcolor="#1E1E1E",
                                                         content=ft.Column(tight=True, spacing=15, controls=[
@@ -652,7 +652,20 @@ class SistemaIndependiente:
                 self.page.update()
 
         threading.Thread(target=_tarea, daemon=True).start()
-        
+    
+    def _validar_solo_numeros(self, e):
+        """
+        Valida que el input solo contenga números.
+        Permite borrar el contenido sin bloquearse.
+        """
+        if e.control.value:
+            # Filtramos solo dígitos
+            valor_limpio = "".join(filter(str.isdigit, e.control.value))
+            # Si hubo cambios (había letras o símbolos), actualizamos
+            if valor_limpio != e.control.value:
+                e.control.value = valor_limpio
+                e.control.update()
+
     def _recargar_datos(self, actualizar_partidos=False, actualizar_torneos=False, actualizar_admin=False):
         # Activamos las banderas correspondientes
         if actualizar_partidos:

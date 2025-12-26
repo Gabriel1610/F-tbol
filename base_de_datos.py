@@ -60,8 +60,7 @@ class BaseDeDatos:
 
     def obtener_ranking(self):
         """
-        Calcula el ranking directamente en la Base de Datos.
-        Utiliza la constante PUNTOS definida al inicio del archivo.
+        Calcula el ranking filtrando SOLO el último pronóstico de cada usuario por partido.
         """
         conexion = None
         cursor = None
@@ -69,12 +68,6 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor() 
 
-            # CAMBIOS IMPORTANTES:
-            # 1. Usamos COALESCE(SUM(...), 0) para que devuelva 0 en lugar de None si no hay puntos.
-            # 2. Usamos LEFT JOIN para traer a TODOS los usuarios, tengan o no predicciones.
-            # 3. La condición "goles_independiente IS NOT NULL" se mueve al ON del JOIN. 
-            #    Esto evita filtrar a los usuarios que no tienen partidos jugados aun.
-            
             sql = f"""
             SELECT 
                 u.username,
@@ -96,8 +89,19 @@ class BaseDeDatos:
                 COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival
 
             FROM usuarios u
-            LEFT JOIN pronosticos pr ON u.id = pr.usuario_id
-            -- Aquí está el truco: Filtramos que el partido se haya jugado EN EL JOIN, no en el WHERE
+            -- CORRECCIÓN: Subconsulta para obtener SOLO el último pronóstico por usuario y partido
+            LEFT JOIN (
+                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
+                FROM pronosticos p1
+                INNER JOIN (
+                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    GROUP BY usuario_id, partido_id
+                ) p2 ON p1.usuario_id = p2.usuario_id 
+                    AND p1.partido_id = p2.partido_id 
+                    AND p1.fecha_prediccion = p2.max_fecha
+            ) pr ON u.id = pr.usuario_id
+            
             LEFT JOIN partidos p ON pr.partido_id = p.id AND p.goles_independiente IS NOT NULL
             
             GROUP BY u.id, u.username
@@ -231,7 +235,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-            
+
     def obtener_partidos(self, usuario, filtro='todos', edicion_id=None, rival_id=None):
         """
         Obtiene la lista de partidos filtrada y ordenada.
@@ -431,8 +435,7 @@ class BaseDeDatos:
 
     def obtener_todos_pronosticos(self):
         """
-        Obtiene el listado completo de pronósticos de todos los usuarios
-        con el cálculo de puntos incluido en la misma consulta.
+        Obtiene el listado de los ÚLTIMOS pronósticos de cada usuario.
         """
         conexion = None
         cursor = None
@@ -440,7 +443,6 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            # Usamos la constante PUNTOS importada al inicio del archivo
             sql = f"""
             SELECT 
                 r.nombre,
@@ -455,16 +457,26 @@ class BaseDeDatos:
                 pr.pred_goles_independiente,
                 pr.pred_goles_rival,
                 -- CÁLCULO DE PUNTOS
-                -- Si el partido no se jugó (goles nulos), los puntos son 0.
                 CASE 
                     WHEN p.goles_independiente IS NULL THEN 0
                     ELSE
-                        -- Suma de las 3 condiciones (3 puntos cada una)
                         (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
                 END as puntos
-            FROM pronosticos pr
+            FROM 
+            -- CORRECCIÓN: Subconsulta para obtener SOLO el último pronóstico
+            (
+                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
+                FROM pronosticos p1
+                INNER JOIN (
+                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    GROUP BY usuario_id, partido_id
+                ) p2 ON p1.usuario_id = p2.usuario_id 
+                    AND p1.partido_id = p2.partido_id 
+                    AND p1.fecha_prediccion = p2.max_fecha
+            ) pr
             JOIN partidos p ON pr.partido_id = p.id
             JOIN usuarios u ON pr.usuario_id = u.id
             JOIN rivales r ON p.rival_id = r.id
@@ -481,8 +493,8 @@ class BaseDeDatos:
             return []
         finally:
             if cursor: cursor.close()
-            if conexion: conexion.close()
-            
+            if conexion: conexion.close() 
+
     def eliminar_partido(self, id_partido):
         """
         Elimina un partido por su ID.
