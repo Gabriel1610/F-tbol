@@ -435,7 +435,8 @@ class BaseDeDatos:
 
     def obtener_todos_pronosticos(self):
         """
-        Obtiene el listado de los ÚLTIMOS pronósticos de cada usuario.
+        Obtiene el listado de TODOS los pronósticos (historial completo).
+        Incluye la fecha en la que se realizó la predicción.
         """
         conexion = None
         cursor = None
@@ -446,10 +447,7 @@ class BaseDeDatos:
             sql = f"""
             SELECT 
                 r.nombre,
-                CASE 
-                    WHEN TIME(p.fecha_hora) = '00:00:00' THEN DATE_FORMAT(p.fecha_hora, '%d/%m/%Y s. h.')
-                    ELSE DATE_FORMAT(p.fecha_hora, '%d/%m/%Y %H:%i')
-                END as fecha_display,
+                p.fecha_hora,
                 CONCAT(c.nombre, ' ', a.numero) as torneo,
                 p.goles_independiente,
                 p.goles_rival,
@@ -457,33 +455,22 @@ class BaseDeDatos:
                 pr.pred_goles_independiente,
                 pr.pred_goles_rival,
                 -- CÁLCULO DE PUNTOS
-                -- CAMBIO: Si goles es NULL, devuelve NULL (no 0) para diferenciar en la interfaz
                 CASE 
                     WHEN p.goles_independiente IS NULL THEN NULL
                     ELSE
                         (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
-                END as puntos
-            FROM 
-            (
-                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
-                FROM pronosticos p1
-                INNER JOIN (
-                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
-                    FROM pronosticos
-                    GROUP BY usuario_id, partido_id
-                ) p2 ON p1.usuario_id = p2.usuario_id 
-                    AND p1.partido_id = p2.partido_id 
-                    AND p1.fecha_prediccion = p2.max_fecha
-            ) pr
+                END as puntos,
+                pr.fecha_prediccion  -- [NUEVO CAMPO: Índice 9]
+            FROM pronosticos pr  -- JOIN Directo (Trae todos los registros)
             JOIN partidos p ON pr.partido_id = p.id
             JOIN usuarios u ON pr.usuario_id = u.id
             JOIN rivales r ON p.rival_id = r.id
             JOIN ediciones e ON p.edicion_id = e.id
             JOIN campeonatos c ON e.campeonato_id = c.id
             JOIN anios a ON e.anio_id = a.id
-            ORDER BY p.fecha_hora DESC, u.username ASC
+            ORDER BY p.fecha_hora DESC, pr.fecha_prediccion DESC
             """
             
             cursor.execute(sql)
@@ -493,7 +480,7 @@ class BaseDeDatos:
             return []
         finally:
             if cursor: cursor.close()
-            if conexion: conexion.close()
+            if conexion: conexion.close() 
 
     def eliminar_partido(self, id_partido):
         """
