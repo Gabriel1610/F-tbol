@@ -457,15 +457,15 @@ class BaseDeDatos:
                 pr.pred_goles_independiente,
                 pr.pred_goles_rival,
                 -- CÁLCULO DE PUNTOS
+                -- CAMBIO: Si goles es NULL, devuelve NULL (no 0) para diferenciar en la interfaz
                 CASE 
-                    WHEN p.goles_independiente IS NULL THEN 0
+                    WHEN p.goles_independiente IS NULL THEN NULL
                     ELSE
                         (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
                 END as puntos
             FROM 
-            -- CORRECCIÓN: Subconsulta para obtener SOLO el último pronóstico
             (
                 SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
                 FROM pronosticos p1
@@ -493,7 +493,7 @@ class BaseDeDatos:
             return []
         finally:
             if cursor: cursor.close()
-            if conexion: conexion.close() 
+            if conexion: conexion.close()
 
     def eliminar_partido(self, id_partido):
         """
