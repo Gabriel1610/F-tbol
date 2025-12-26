@@ -178,14 +178,68 @@ class BaseDeDatos:
             sql_crear = "INSERT INTO rivales (nombre) VALUES (%s)"
             cursor.execute(sql_crear, (nombre_rival,))
             return cursor.lastrowid # Retorna el ID recién creado
-        
-    def obtener_partidos(self, usuario, filtro='todos', edicion_id=None):
+    
+    def obtener_rivales(self):
+        """
+        Obtiene la lista de todos los rivales (ID, Nombre) ordenados alfabéticamente.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            
+            sql = "SELECT id, nombre FROM rivales ORDER BY nombre ASC"
+            cursor.execute(sql)
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error obteniendo rivales: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def insertar_pronostico(self, username, partido_id, pred_cai, pred_rival):
+        """
+        Inserta un nuevo pronóstico en la base de datos para el usuario y partido indicados.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            
+            # 1. Obtener ID del Usuario a partir del username
+            cursor.execute("SELECT id FROM usuarios WHERE username = %s", (username,))
+            res_user = cursor.fetchone()
+            if not res_user:
+                raise Exception("Usuario no encontrado.")
+            usuario_id = res_user[0]
+            
+            # 2. Insertar el pronóstico
+            sql = """
+                INSERT INTO pronosticos (usuario_id, partido_id, pred_goles_independiente, pred_goles_rival)
+                VALUES (%s, %s, %s, %s)
+            """
+            cursor.execute(sql, (usuario_id, partido_id, pred_cai, pred_rival))
+            conexion.commit()
+            return True
+
+        except Exception as e:
+            logger.error(f"Error insertando pronóstico: {e}")
+            raise e
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+            
+    def obtener_partidos(self, usuario, filtro='todos', edicion_id=None, rival_id=None):
         """
         Obtiene la lista de partidos filtrada y ordenada.
         Parámetros:
             usuario (str): Usuario actual.
-            filtro (str): 'todos', 'jugados', 'futuros', 'torneo', 'sin_pronosticar'.
+            filtro (str): 'todos', 'jugados', 'futuros', 'torneo', 'sin_pronosticar', 'equipo'.
             edicion_id (int): ID de la edición (necesario si filtro='torneo').
+            rival_id (int): ID del rival (necesario si filtro='equipo').
         """
         conexion = None
         cursor = None
@@ -206,13 +260,17 @@ class BaseDeDatos:
                 filtro_sql = "WHERE p.fecha_hora <= NOW()"
                 orden_sql = "DESC"
             elif filtro == 'sin_pronosticar':
-                # Futuros Y sin predicción (pred_goles_independiente IS NULL)
                 filtro_sql = "WHERE p.fecha_hora > NOW() AND pr.pred_goles_independiente IS NULL"
                 orden_sql = "ASC"
             elif filtro == 'torneo' and edicion_id is not None:
                 filtro_sql = "WHERE p.edicion_id = %s"
                 orden_sql = "ASC"
                 params.append(edicion_id)
+            elif filtro == 'equipo' and rival_id is not None:
+                # Nuevo filtro por Rival
+                filtro_sql = "WHERE p.rival_id = %s"
+                orden_sql = "DESC" # Pedido: descendente por Fecha y Hora
+                params.append(rival_id)
 
             sql = f"""
             SELECT 
