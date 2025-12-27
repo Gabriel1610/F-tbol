@@ -433,6 +433,24 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
+    def obtener_usuarios(self):
+        """Obtiene la lista de nombres de usuario registrados."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            # Ordenamos alfabéticamente
+            cursor.execute("SELECT username FROM usuarios ORDER BY username ASC")
+            # Retornamos una lista simple de strings
+            return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error obteniendo usuarios: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+            
     def obtener_todos_pronosticos(self):
         """
         Obtiene el listado de TODOS los pronósticos (historial completo).

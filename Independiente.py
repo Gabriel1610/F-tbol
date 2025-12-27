@@ -174,6 +174,89 @@ class SistemaIndependiente:
         # Recargamos solo la tabla de partidos
         self._recargar_datos(actualizar_partidos=True)
 
+    def _cambiar_filtro_tiempo(self, nuevo_filtro):
+        """
+        Gestiona el grupo de filtros de Tiempo (Todos, Futuros, Jugados).
+        Estos son EXCLUYENTES entre sí.
+        """
+        self.filtro_pron_tiempo = nuevo_filtro
+        
+        # Actualizar colores botones del grupo tiempo
+        self.btn_pron_todos.bgcolor = "blue" if nuevo_filtro == 'todos' else "#333333"
+        self.btn_pron_por_jugar.bgcolor = "blue" if nuevo_filtro == 'futuros' else "#333333"
+        self.btn_pron_jugados.bgcolor = "blue" if nuevo_filtro == 'jugados' else "#333333"
+        
+        self.btn_pron_todos.update()
+        self.btn_pron_por_jugar.update()
+        self.btn_pron_jugados.update()
+        
+        self._actualizar_titulo_pronosticos()
+        self._recargar_datos(actualizar_pronosticos=True)
+
+    def _gestionar_accion_boton_filtro(self, tipo):
+        """
+        Gestiona la lógica 'toggle' de los botones específicos (Torneo, Equipo, Usuario).
+        - Si el filtro ya está activo -> Lo desactiva (limpia variable y botón negro).
+        - Si no está activo -> Abre el modal para seleccionar.
+        """
+        if tipo == 'torneo':
+            if self.filtro_pron_torneo is not None:
+                # Desactivar
+                self.filtro_pron_torneo = None
+                self.btn_pron_por_torneo.bgcolor = "#333333"
+                self.btn_pron_por_torneo.update()
+                self._actualizar_titulo_pronosticos()
+                self._recargar_datos(actualizar_pronosticos=True)
+            else:
+                # Abrir Modal
+                self._abrir_selector_torneo_pronosticos(None)
+                
+        elif tipo == 'equipo':
+            if self.filtro_pron_equipo is not None:
+                # Desactivar
+                self.filtro_pron_equipo = None
+                self.btn_pron_por_equipo.bgcolor = "#333333"
+                self.btn_pron_por_equipo.update()
+                self._actualizar_titulo_pronosticos()
+                self._recargar_datos(actualizar_pronosticos=True)
+            else:
+                # Abrir Modal
+                self._abrir_selector_equipo_pronosticos(None)
+                
+        elif tipo == 'usuario':
+            if self.filtro_pron_usuario is not None:
+                # Desactivar
+                self.filtro_pron_usuario = None
+                self.btn_pron_por_usuario.bgcolor = "#333333"
+                self.btn_pron_por_usuario.update()
+                self._actualizar_titulo_pronosticos()
+                self._recargar_datos(actualizar_pronosticos=True)
+            else:
+                # Abrir Modal
+                self._abrir_selector_usuario_pronosticos(None)
+
+    def _actualizar_titulo_pronosticos(self):
+        """Construye el título dinámico basado en TODOS los filtros activos."""
+        partes = []
+        
+        # Parte Tiempo
+        if self.filtro_pron_tiempo == 'todos': partes.append("Todos")
+        elif self.filtro_pron_tiempo == 'futuros': partes.append("Por Jugar")
+        elif self.filtro_pron_tiempo == 'jugados': partes.append("Finalizados")
+        
+        # Partes Específicas
+        detalles = []
+        if self.filtro_pron_torneo: detalles.append(self.filtro_pron_torneo)
+        if self.filtro_pron_equipo: detalles.append(f"vs {self.filtro_pron_equipo}")
+        if self.filtro_pron_usuario: detalles.append(f"de {self.filtro_pron_usuario}")
+        
+        titulo = "Pronósticos: " + " - ".join(partes)
+        if detalles:
+            titulo += " (" + ", ".join(detalles) + ")"
+            
+        self.txt_titulo_pronosticos.value = titulo
+        self.txt_titulo_pronosticos.update()
+
     # --- PANTALLA 2: MENÚ PRINCIPAL ---
     def _ir_a_menu_principal(self, usuario):
         self.page.controls.clear()
@@ -192,15 +275,19 @@ class SistemaIndependiente:
         self.pronosticos_sort_col_index = None
         self.pronosticos_sort_asc = True
         
-        # Filtros Partidos
+        # Filtros Partidos (Pestaña Partidos)
         self.filtro_partidos = 'futuros'
         self.filtro_edicion_id = None 
         self.filtro_rival_id = None 
 
-        # --- NUEVOS FILTROS PRONÓSTICOS ---
-        self.filtro_pronosticos = 'todos' # todos, futuros, jugados, torneo, equipo
-        self.filtro_pron_torneo_nombre = None 
-        self.filtro_pron_rival_nombre = None
+        # --- VARIABLES DE FILTROS PRONÓSTICOS (NUEVA LÓGICA) ---
+        # 1. Filtro de Tiempo (Excluyente: Todos, Futuros, Jugados)
+        self.filtro_pron_tiempo = 'todos' 
+        
+        # 2. Filtros Específicos (Combinables)
+        self.filtro_pron_torneo = None # Guardará string "Torneo Año"
+        self.filtro_pron_equipo = None # Guardará string "Rival"
+        self.filtro_pron_usuario = None # Guardará string "Usuario"
         
         # Variables para Modales
         self.cache_ediciones_modal = [] 
@@ -208,7 +295,8 @@ class SistemaIndependiente:
         self.temp_campeonato_sel = None 
         self.temp_anio_sel = None
         self.temp_rival_sel_id = None 
-        self.temp_rival_sel_nombre = None 
+        self.temp_rival_sel_nombre = None
+        self.temp_usuario_sel = None
         
         # Variables de selección UI
         self.edicion_seleccionada_id = None
@@ -241,7 +329,6 @@ class SistemaIndependiente:
         # --- DEFINICIÓN DE COLUMNAS ---
         columnas_partidos = [ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Tu pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Tus puntos", color="green", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center))]
 
-        # MODIFICACIÓN: Agregada columna "Fecha Predicción" en el índice 6
         columnas_pronosticos = [
             ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
@@ -249,7 +336,6 @@ class SistemaIndependiente:
             ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
-            # NUEVA COLUMNA
             ft.DataColumn(ft.Container(content=ft.Text("Fecha Predicción", color="white70", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Puntos", color="green", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center), numeric=True, on_sort=self._ordenar_tabla_pronosticos)
         ]
@@ -292,7 +378,7 @@ class SistemaIndependiente:
 
         # --- TÍTULOS DINÁMICOS ---
         self.txt_titulo_partidos = ft.Text("Partidos por jugar", size=28, weight=ft.FontWeight.BOLD, color="white")
-        self.txt_titulo_pronosticos = ft.Text("Todos los pronósticos", size=28, weight=ft.FontWeight.BOLD, color="white") # Nuevo título
+        self.txt_titulo_pronosticos = ft.Text("Todos los pronósticos", size=28, weight=ft.FontWeight.BOLD, color="white") 
 
         # --- BOTONES FILTROS PARTIDOS ---
         self.btn_todos = ft.ElevatedButton("Todos", icon=ft.Icons.LIST, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro('todos'))
@@ -302,12 +388,17 @@ class SistemaIndependiente:
         self.btn_sin_pronosticar = ft.ElevatedButton("Sin pronosticar", icon=ft.Icons.EVENT_BUSY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro('sin_pronosticar'))
         self.btn_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=self._abrir_selector_equipo)
 
-        # --- NUEVOS BOTONES FILTROS PRONÓSTICOS ---
-        self.btn_pron_todos = ft.ElevatedButton("Todos", icon=ft.Icons.LIST, bgcolor="blue", color="white", on_click=lambda _: self._cambiar_filtro_pronosticos('todos'))
-        self.btn_pron_por_jugar = ft.ElevatedButton("Por jugar", icon=ft.Icons.UPCOMING, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_pronosticos('futuros'))
-        self.btn_pron_jugados = ft.ElevatedButton("Jugados", icon=ft.Icons.HISTORY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_pronosticos('jugados'))
-        self.btn_pron_por_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", on_click=self._abrir_selector_torneo_pronosticos)
-        self.btn_pron_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=self._abrir_selector_equipo_pronosticos)
+        # --- BOTONES FILTROS PRONÓSTICOS (MODIFICADOS) ---
+        # Grupo 1: Tiempo (Excluyentes)
+        self.btn_pron_todos = ft.ElevatedButton("Todos", icon=ft.Icons.LIST, bgcolor="blue", color="white", on_click=lambda _: self._cambiar_filtro_tiempo('todos'))
+        self.btn_pron_por_jugar = ft.ElevatedButton("Por jugar", icon=ft.Icons.UPCOMING, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo('futuros'))
+        self.btn_pron_jugados = ft.ElevatedButton("Jugados", icon=ft.Icons.HISTORY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo('jugados'))
+        
+        # Grupo 2: Específicos (Combinables y "Toggleables")
+        # Usamos una función lambda para manejar la lógica de "si ya está activo, desactivalo; sino, abrí modal"
+        self.btn_pron_por_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('torneo'))
+        self.btn_pron_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('equipo'))
+        self.btn_pron_por_usuario = ft.ElevatedButton("Por usuario", icon=ft.Icons.PERSON, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('usuario'))
 
         # --- CONTROLES FORMULARIO PARTIDOS ---
         self.txt_instruccion = ft.Text("1. Seleccione un Torneo en la tabla inferior", size=12, italic=True, color="yellow", visible=False)
@@ -345,14 +436,14 @@ class SistemaIndependiente:
             # Pestaña Partidos
             ft.Tab(text="Partidos", icon="sports_soccer", content=ft.Container(content=ft.Column(controls=[self.txt_titulo_partidos, self.loading_partidos, ft.Row(vertical_alignment=ft.CrossAxisAlignment.START, controls=[ft.Container(height=380, content=ft.Row(controls=[ft.Column(spacing=0, controls=[self.tabla_partidos_header, ft.Container(height=310, content=ft.Column(controls=[self.tabla_partidos], scroll=ft.ScrollMode.ALWAYS))])], scroll=ft.ScrollMode.ALWAYS)), ft.Container(width=10), ft.Container(width=200, padding=10, border=ft.border.all(1, "white10"), border_radius=8, bgcolor="#1E1E1E", content=ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=15, controls=[ft.Text("Tu Pronóstico", size=16, weight=ft.FontWeight.BOLD), self.input_pred_cai, self.input_pred_rival, self.btn_pronosticar]))]), ft.Container(height=10), ft.Row(controls=[self.btn_todos, self.btn_por_jugar, self.btn_jugados, self.btn_por_torneo, self.btn_sin_pronosticar, self.btn_por_equipo], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER)], scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.START), padding=20, alignment=ft.alignment.top_left)),
             
-            # Pestaña Pronósticos (MODIFICADA: Agregado botones)
+            # Pestaña Pronósticos
             ft.Tab(
                 text="Pronósticos", 
                 icon="list_alt", 
                 content=ft.Container(
                     content=ft.Column(
                         controls=[
-                            self.txt_titulo_pronosticos, # Usamos variable
+                            self.txt_titulo_pronosticos,
                             self.loading_pronosticos, 
                             
                             ft.Container(
@@ -371,7 +462,7 @@ class SistemaIndependiente:
                                     ]
                                 )
                             ),
-                            # --- NUEVA FILA DE BOTONES PARA PRONÓSTICOS ---
+                            # FILA DE BOTONES
                             ft.Container(height=10),
                             ft.Row(
                                 controls=[
@@ -379,7 +470,8 @@ class SistemaIndependiente:
                                     self.btn_pron_por_jugar,
                                     self.btn_pron_jugados,
                                     self.btn_pron_por_torneo,
-                                    self.btn_pron_por_equipo
+                                    self.btn_pron_por_equipo,
+                                    self.btn_pron_por_usuario # Botón Agregado
                                 ],
                                 alignment=ft.MainAxisAlignment.START,
                                 vertical_alignment=ft.CrossAxisAlignment.CENTER
@@ -498,6 +590,41 @@ class SistemaIndependiente:
                 e.control.value = valor_limpio
                 e.control.update()
 
+    def _abrir_selector_usuario_pronosticos(self, e):
+        self.lv_usuarios = ft.ListView(expand=True, spacing=5, height=300)
+        self.btn_ver_usuario = ft.ElevatedButton("Ver", icon=ft.Icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_usuario_pronosticos)
+        
+        def _cargar_usuarios_modal():
+            try:
+                bd = BaseDeDatos()
+                usuarios = bd.obtener_usuarios() 
+                controles = []
+                for usuario in usuarios:
+                    controles.append(ft.ListTile(title=ft.Text(usuario, size=14), data=usuario, on_click=self._seleccionar_usuario_modal, bgcolor="#2D2D2D", shape=ft.RoundedRectangleBorder(radius=5)))
+                self.lv_usuarios.controls = controles
+                self.lv_usuarios.update()
+            except Exception as ex:
+                print(f"Error cargando modal usuarios: {ex}")
+
+        contenido_modal = ft.Container(width=400, height=400, content=ft.Column(controls=[ft.Text("Seleccione un Usuario", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_usuarios, border=ft.border.all(1, "white24"), border_radius=5, padding=5, expand=True)]))
+
+        self.dlg_modal_usuario = ft.AlertDialog(modal=True, title=ft.Text("Filtrar por Usuario"), content=contenido_modal, actions=[ft.TextButton("Cancelar", on_click=lambda e: self.page.close(self.dlg_modal_usuario)), self.btn_ver_usuario], actions_alignment=ft.MainAxisAlignment.END)
+        self.page.open(self.dlg_modal_usuario)
+        threading.Thread(target=_cargar_usuarios_modal, daemon=True).start()
+
+    def _seleccionar_usuario_modal(self, e):
+        """Al clickear un usuario, se habilita el botón ver."""
+        usuario_sel = e.control.data
+        self.temp_usuario_sel = usuario_sel
+        
+        # Resaltar selección
+        for c in self.lv_usuarios.controls:
+            c.bgcolor = "blue" if c.data == usuario_sel else "#2D2D2D"
+        self.lv_usuarios.update()
+        
+        self.btn_ver_usuario.disabled = False
+        self.btn_ver_usuario.update()
+
     def _cambiar_filtro_pronosticos(self, nuevo_filtro):
         """Gestiona el cambio de filtros en la pestaña Pronósticos"""
         self.filtro_pronosticos = nuevo_filtro
@@ -507,6 +634,8 @@ class SistemaIndependiente:
             self.filtro_pron_torneo_nombre = None
         if nuevo_filtro != 'equipo':
             self.filtro_pron_rival_nombre = None
+        if nuevo_filtro != 'usuario':
+            self.filtro_pron_usuario = None
             
         # Actualizar títulos
         if nuevo_filtro == 'todos':
@@ -524,12 +653,14 @@ class SistemaIndependiente:
         self.btn_pron_jugados.bgcolor = "blue" if nuevo_filtro == 'jugados' else "#333333"
         self.btn_pron_por_torneo.bgcolor = "blue" if nuevo_filtro == 'torneo' else "#333333"
         self.btn_pron_por_equipo.bgcolor = "blue" if nuevo_filtro == 'equipo' else "#333333"
+        self.btn_pron_por_usuario.bgcolor = "blue" if nuevo_filtro == 'usuario' else "#333333"
         
         self.btn_pron_todos.update()
         self.btn_pron_por_jugar.update()
         self.btn_pron_jugados.update()
         self.btn_pron_por_torneo.update()
         self.btn_pron_por_equipo.update()
+        self.btn_pron_por_usuario.update()
         
         # Recargar solo pronósticos
         self._recargar_datos(actualizar_pronosticos=True)
@@ -564,31 +695,42 @@ class SistemaIndependiente:
         threading.Thread(target=_cargar_datos_modal, daemon=True).start()
 
     def _confirmar_filtro_torneo_pronosticos(self, e):
-        """Confirma selección para la pestaña Pronósticos"""
-        # CORRECCIÓN: Ahora requerimos ambos (Nombre y Año) para formar el string completo
+        """Confirma selección torneo (COMBINABLE)"""
         if self.temp_campeonato_sel and self.temp_anio_sel:
-            self.filtro_pronosticos = 'torneo'
+            # 1. Guardar filtro
+            self.filtro_pron_torneo = f"{self.temp_campeonato_sel} {self.temp_anio_sel}"
             
-            # Formamos el string exacto que viene de la BD: "Nombre Año"
-            self.filtro_pron_torneo_nombre = f"{self.temp_campeonato_sel} {self.temp_anio_sel}"
-            
-            self.txt_titulo_pronosticos.value = f"Pronósticos: {self.filtro_pron_torneo_nombre}"
-            self.txt_titulo_pronosticos.update()
-            
-            # Actualizar botones
-            self.btn_pron_todos.bgcolor = "#333333"
-            self.btn_pron_por_jugar.bgcolor = "#333333"
-            self.btn_pron_jugados.bgcolor = "#333333"
+            # 2. Actualizar visual botón a AZUL
             self.btn_pron_por_torneo.bgcolor = "blue"
-            self.btn_pron_por_equipo.bgcolor = "#333333"
-            
-            self.btn_pron_todos.update()
-            self.btn_pron_por_jugar.update()
-            self.btn_pron_jugados.update()
             self.btn_pron_por_torneo.update()
+            
+            # 3. Cerrar y recargar (acumulando filtros)
+            self._actualizar_titulo_pronosticos()
+            self.page.close(self.dlg_modal)
+            self._recargar_datos(actualizar_pronosticos=True)
+
+    def _confirmar_filtro_equipo_pronosticos(self, e):
+        """Confirma selección equipo (COMBINABLE)"""
+        if self.temp_rival_sel_nombre:
+            self.filtro_pron_equipo = self.temp_rival_sel_nombre
+            
+            self.btn_pron_por_equipo.bgcolor = "blue"
             self.btn_pron_por_equipo.update()
             
-            self.page.close(self.dlg_modal)
+            self._actualizar_titulo_pronosticos()
+            self.page.close(self.dlg_modal_equipo)
+            self._recargar_datos(actualizar_pronosticos=True)
+
+    def _confirmar_filtro_usuario_pronosticos(self, e):
+        """Confirma selección usuario (COMBINABLE)"""
+        if self.temp_usuario_sel:
+            self.filtro_pron_usuario = self.temp_usuario_sel
+            
+            self.btn_pron_por_usuario.bgcolor = "blue"
+            self.btn_pron_por_usuario.update()
+            
+            self._actualizar_titulo_pronosticos()
+            self.page.close(self.dlg_modal_usuario)
             self._recargar_datos(actualizar_pronosticos=True)
 
     def _abrir_selector_equipo_pronosticos(self, e):
@@ -614,31 +756,6 @@ class SistemaIndependiente:
         self.page.open(self.dlg_modal_equipo)
         threading.Thread(target=_cargar_rivales_modal, daemon=True).start()
 
-    def _confirmar_filtro_equipo_pronosticos(self, e):
-        """Confirma selección para la pestaña Pronósticos"""
-        if self.temp_rival_sel_nombre:
-            self.filtro_pronosticos = 'equipo'
-            self.filtro_pron_rival_nombre = self.temp_rival_sel_nombre
-            
-            self.txt_titulo_pronosticos.value = f"Pronósticos contra {self.temp_rival_sel_nombre}"
-            self.txt_titulo_pronosticos.update()
-            
-            # Actualizar botones
-            self.btn_pron_todos.bgcolor = "#333333"
-            self.btn_pron_por_jugar.bgcolor = "#333333"
-            self.btn_pron_jugados.bgcolor = "#333333"
-            self.btn_pron_por_torneo.bgcolor = "#333333"
-            self.btn_pron_por_equipo.bgcolor = "blue"
-            
-            self.btn_pron_todos.update()
-            self.btn_pron_por_jugar.update()
-            self.btn_pron_jugados.update()
-            self.btn_pron_por_torneo.update()
-            self.btn_pron_por_equipo.update()
-            
-            self.page.close(self.dlg_modal_equipo)
-            self._recargar_datos(actualizar_pronosticos=True)
-
     def _recargar_datos(self, actualizar_partidos=False, actualizar_torneos=False, actualizar_admin=False, actualizar_pronosticos=False, actualizar_ranking=False):
         # Activamos las banderas correspondientes
         if actualizar_partidos:
@@ -661,7 +778,6 @@ class SistemaIndependiente:
         if actualizar_torneos:
             self.loading_torneos_admin.visible = True
         
-        # --- NUEVO: Aseguramos que la tabla pronósticos muestre la flecha correcta visualmente ---
         if actualizar_pronosticos:
              self.tabla_pronosticos.sort_column_index = self.pronosticos_sort_col_index
              self.tabla_pronosticos.sort_ascending = self.pronosticos_sort_asc
@@ -743,46 +859,48 @@ class SistemaIndependiente:
                         ))
                     self.tabla_partidos.rows = filas_tabla_partidos
 
-                # --- 1.B CARGAR PRONÓSTICOS (GLOBAL - CON FILTROS Y ORDENAMIENTO EN PYTHON) ---
+                # --- 1.B CARGAR PRONÓSTICOS (LÓGICA COMBINADA) ---
                 if actualizar_pronosticos:
-                    # Traemos TODO de la base (con fecha_prediccion en índice 9)
                     datos_pronosticos = bd.obtener_todos_pronosticos()
-                    
-                    # FILTRADO
                     ahora = datetime.now()
                     
-                    if self.filtro_pronosticos == 'futuros':
+                    # 1. FILTRO DE TIEMPO (Excluyente)
+                    if self.filtro_pron_tiempo == 'futuros':
                          datos_pronosticos = [d for d in datos_pronosticos if isinstance(d[1], datetime) and d[1] > ahora]
-                    elif self.filtro_pronosticos == 'jugados':
+                    elif self.filtro_pron_tiempo == 'jugados':
                          datos_pronosticos = [d for d in datos_pronosticos if isinstance(d[1], datetime) and d[1] <= ahora]
-                    elif self.filtro_pronosticos == 'torneo' and self.filtro_pron_torneo_nombre:
-                         datos_pronosticos = [d for d in datos_pronosticos if str(d[2]) == self.filtro_pron_torneo_nombre]
-                    elif self.filtro_pronosticos == 'equipo' and self.filtro_pron_rival_nombre:
-                         datos_pronosticos = [d for d in datos_pronosticos if str(d[0]) == self.filtro_pron_rival_nombre]
                     
-                    # ORDENAMIENTO MODIFICADO (Ahora hay 8 columnas)
+                    # 2. FILTROS ESPECÍFICOS (Acumulativos/Simultáneos)
+                    if self.filtro_pron_torneo:
+                         datos_pronosticos = [d for d in datos_pronosticos if str(d[2]) == self.filtro_pron_torneo]
+                    
+                    if self.filtro_pron_equipo:
+                         datos_pronosticos = [d for d in datos_pronosticos if str(d[0]) == self.filtro_pron_equipo]
+                         
+                    if self.filtro_pron_usuario:
+                         datos_pronosticos = [d for d in datos_pronosticos if str(d[5]) == self.filtro_pron_usuario]
+                    
+                    # 3. ORDENAMIENTO
                     if self.pronosticos_sort_col_index is not None:
+                        # Si hay clic en columna, respetamos eso
                         idx = self.pronosticos_sort_col_index
                         reverse_manual = not self.pronosticos_sort_asc 
-                        
                         key_func = None
-                        if idx == 0: key_func = lambda x: str(x[0]).lower() # Rival
-                        elif idx == 1: key_func = lambda x: x[1] if isinstance(x[1], datetime) else datetime.min # Fecha P.
-                        elif idx == 2: key_func = lambda x: str(x[2]).lower() # Torneo
-                        elif idx == 3: key_func = lambda x: (x[3] if x[3] is not None else -1) # Resultado
-                        elif idx == 4: key_func = lambda x: str(x[5]).lower() # Usuario
-                        elif idx == 5: key_func = lambda x: (x[6] if x[6] is not None else -1) # Pronostico
-                        # NUEVO ÍNDICE: 6 es Fecha Predicción (x[9] en BD)
+                        if idx == 0: key_func = lambda x: str(x[0]).lower() 
+                        elif idx == 1: key_func = lambda x: x[1] if isinstance(x[1], datetime) else datetime.min 
+                        elif idx == 2: key_func = lambda x: str(x[2]).lower() 
+                        elif idx == 3: key_func = lambda x: (x[3] if x[3] is not None else -1) 
+                        elif idx == 4: key_func = lambda x: str(x[5]).lower() 
+                        elif idx == 5: key_func = lambda x: (x[6] if x[6] is not None else -1) 
                         elif idx == 6: key_func = lambda x: x[9] if isinstance(x[9], datetime) else datetime.min
-                        # Puntos ahora es índice 7 (x[8] en BD)
                         elif idx == 7: key_func = lambda x: (x[8] if x[8] is not None else -1)
-
                         if key_func:
                             datos_pronosticos.sort(key=key_func, reverse=reverse_manual)
                     else:
-                        # ORDENAMIENTO POR DEFECTO
+                        # Orden por defecto: Descendente (más nuevo primero) en general
+                        # PERO si el filtro de tiempo es 'futuros', solemos querer Ascendente (lo más próximo)
                         reversa = True 
-                        if self.filtro_pronosticos in ['futuros', 'torneo']:
+                        if self.filtro_pron_tiempo == 'futuros':
                             reversa = False
                         datos_pronosticos.sort(key=lambda x: x[1] if isinstance(x[1], datetime) else datetime.min, reverse=reversa)
 
@@ -797,20 +915,18 @@ class SistemaIndependiente:
                         pgc = fila[6]
                         pgr = fila[7]
                         puntos = fila[8]
-                        fecha_pred = fila[9] # NUEVO CAMPO
+                        fecha_pred = fila[9]
 
-                        # Formato Fecha Partido
                         if isinstance(fecha, datetime):
                             if fecha.hour == 0 and fecha.minute == 0:
-                                txt_fecha = fecha.strftime("%d/%m s. h.")
+                                txt_fecha = fecha.strftime("%d/%m/%Y s. h.") 
                             else:
-                                txt_fecha = fecha.strftime("%d/%m %H:%M")
+                                txt_fecha = fecha.strftime("%d/%m/%Y %H:%M") 
                         else:
                             txt_fecha = str(fecha)
                         
-                        # Formato Fecha Predicción
                         if isinstance(fecha_pred, datetime):
-                            txt_fecha_pred = fecha_pred.strftime("%d/%m %H:%M")
+                            txt_fecha_pred = fecha_pred.strftime("%d/%m/%Y %H:%M") 
                         else:
                             txt_fecha_pred = str(fecha_pred) if fecha_pred else "-"
 
@@ -836,7 +952,6 @@ class SistemaIndependiente:
                             ft.DataCell(ft.Container(content=ft.Text(txt_res, color="white", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center)),
                             ft.DataCell(ft.Container(content=ft.Text(str(user), color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left)),
                             ft.DataCell(ft.Container(content=ft.Text(txt_pron, color="cyan", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center)),
-                            # NUEVA CELDA
                             ft.DataCell(ft.Container(content=ft.Text(txt_fecha_pred, color="white70"), width=140, alignment=ft.alignment.center_left)),
                             ft.DataCell(ft.Container(content=ft.Text(txt_puntos, color=color_puntos, size=16, weight=ft.FontWeight.BOLD), alignment=ft.alignment.center))
                         ]))
