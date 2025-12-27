@@ -261,32 +261,25 @@ class SistemaIndependiente:
     def _ir_a_menu_principal(self, usuario):
         self.page.controls.clear()
         self.page.bgcolor = Estilos.COLOR_ROJO_CAI
-        
         self.usuario_actual = usuario
         
-        # --- BANDERAS DE ESTADO ---
+        # --- BANDERAS Y ESTADOS ---
         self.cargando_partidos = False
         self.cargando_torneos = False
         self.procesando_partidos = False 
         self.procesando_torneos = False
         self.editando_torneo = False 
-        
-        # Variables de Ordenamiento
         self.pronosticos_sort_col_index = None
         self.pronosticos_sort_asc = True
-        
-        # Filtros Partidos
         self.filtro_partidos = 'futuros'
         self.filtro_edicion_id = None 
         self.filtro_rival_id = None 
-
-        # --- VARIABLES DE FILTROS PRONÓSTICOS ---
         self.filtro_pron_tiempo = 'todos' 
         self.filtro_pron_torneo = None 
         self.filtro_pron_equipo = None 
         self.filtro_pron_usuario = None 
-        
-        # Variables para Modales
+        self.filtro_ranking_edicion_id = None
+        self.filtro_ranking_nombre = None
         self.cache_ediciones_modal = [] 
         self.cache_rivales_modal = [] 
         self.temp_campeonato_sel = None 
@@ -294,18 +287,14 @@ class SistemaIndependiente:
         self.temp_rival_sel_id = None 
         self.temp_rival_sel_nombre = None
         self.temp_usuario_sel = None
-        
-        # Variables de selección UI
         self.edicion_seleccionada_id = None
         self.fila_seleccionada_ref = None
         self.partido_seleccionado_id = None
         self.fila_partido_ref = None
-        
-        # Variable para selección de pronóstico
         self.partido_a_pronosticar_id = None
         self.fila_pronostico_ref = None
-        
-        # Inicializar Selectores
+
+        # --- SELECTORES ---
         self.date_picker = ft.DatePicker(on_change=self._fecha_cambiada, confirm_text="Seleccionar", cancel_text="Cancelar")
         self.time_picker = ft.TimePicker(on_change=self._hora_cambiada, confirm_text="Seleccionar", cancel_text="Cancelar")
         self.page.overlay.extend([self.date_picker, self.time_picker])
@@ -318,91 +307,37 @@ class SistemaIndependiente:
             actions=[ft.IconButton(icon=ft.Icons.LOGOUT, tooltip="Cerrar Sesión", icon_color=Estilos.COLOR_ROJO_CAI, on_click=self._cerrar_sesion), ft.Container(width=10)]
         )
 
+        # --- BARRAS DE CARGA ---
+        self.loading = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=True)
+        self.loading_copas = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False) # NUEVA BARRA
+        self.loading_partidos = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False) 
+        self.loading_pronosticos = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False) 
+        self.loading_admin = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
+        self.loading_torneos_admin = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
+
+        # --- BOTÓN RANKING Y CONTENEDOR "LABELFRAME" FILTROS ---
+        self.btn_ranking_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", height=30, style=ft.ButtonStyle(padding=10, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_torneo_ranking)
+
+        # Contenedor que simula un Labelframe (Borde con título)
+        self.contenedor_filtro_torneo = ft.Container(
+            padding=ft.padding.all(10),
+            border=ft.border.all(1, "white24"),
+            border_radius=8,
+            bgcolor="#1E1E1E", 
+            content=ft.Column(
+                spacing=5,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text("Filtros", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
+                    self.btn_ranking_torneo
+                ]
+            )
+        )
+
         # --- CONTROLES FORMULARIO PRONÓSTICOS ---
         self.input_pred_cai = ft.TextField(label="Goles CAI", width=80, text_align=ft.TextAlign.CENTER, keyboard_type=ft.KeyboardType.NUMBER, max_length=2, bgcolor="#2D2D2D", border_color="white24", color="white", on_change=self._validar_solo_numeros)
         self.input_pred_rival = ft.TextField(label="Goles Rival", width=110, text_align=ft.TextAlign.CENTER, keyboard_type=ft.KeyboardType.NUMBER, max_length=2, bgcolor="#2D2D2D", border_color="white24", color="white", on_change=self._validar_solo_numeros)
         self.btn_pronosticar = ft.ElevatedButton("Pronosticar", icon=ft.Icons.SPORTS_SOCCER, bgcolor="green", color="white", on_click=self._guardar_pronostico)
-
-        # --- DEFINICIÓN DE COLUMNAS ---
-        columnas_partidos = [ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Tu pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Tus puntos", color="green", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center))]
-
-        columnas_pronosticos = [
-            ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Fecha Predicción", color="white70", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Puntos", color="green", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center), numeric=True, on_sort=self._ordenar_tabla_pronosticos)
-        ]
-
-        columnas_estadisticas = [ft.DataColumn(ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), numeric=True), ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Text("Puntos\nTotales", color="yellow", weight=ft.FontWeight.BOLD), numeric=True), ft.DataColumn(ft.Text("Pts.\nGanador", color="white"), numeric=True), ft.DataColumn(ft.Text("Pts.\nGoles CAI", color="white"), numeric=True), ft.DataColumn(ft.Text("Pts.\nGoles Rival", color="white"), numeric=True)]
-
-        # --- DEFINICIÓN DE NUEVA TABLA: TORNEOS GANADOS ---
-        columnas_copas = [
-            ft.DataColumn(ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), numeric=True),
-            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=200, alignment=ft.alignment.center_left)),
-            ft.DataColumn(ft.Container(content=ft.Text("Torneos ganados", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center), numeric=True)
-        ]
-
-        # --- DEFINICIÓN DE TABLAS ---
-        self.tabla_estadisticas_header = ft.DataTable(width=600, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=15, columns=columnas_estadisticas, rows=[])
-        self.tabla_estadisticas = ft.DataTable(width=600, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
-        
-        self.tabla_copas_header = ft.DataTable(width=450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_copas, rows=[])
-        self.tabla_copas = ft.DataTable(width=450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_copas, rows=[])
-
-        self.tabla_partidos_header = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_partidos, rows=[])
-        self.tabla_partidos = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_partidos, rows=[])
-
-        self.tabla_pronosticos_header = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_pronosticos, rows=[])
-        
-        self.tabla_pronosticos = ft.DataTable(
-            bgcolor="#2D2D2D", 
-            border=ft.border.all(1, "white10"), 
-            border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), 
-            vertical_lines=ft.border.BorderSide(1, "white10"), 
-            horizontal_lines=ft.border.BorderSide(1, "white10"), 
-            heading_row_height=0, 
-            data_row_max_height=60, 
-            column_spacing=20, 
-            columns=columnas_pronosticos, 
-            sort_column_index=self.pronosticos_sort_col_index,
-            sort_ascending=self.pronosticos_sort_asc,
-            rows=[]
-        )
-        
-        self.tabla_partidos_admin = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=60, column_spacing=20, show_checkbox_column=False, columns=[ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=230, alignment=ft.alignment.center_left))], rows=[])
-        self.tabla_torneos = ft.DataTable(width=450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=60, data_row_max_height=50, column_spacing=20, show_checkbox_column=False, columns=[ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Año", color="yellow", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center_left), numeric=True)], rows=[])
-
-        # --- BARRAS DE CARGA ---
-        self.loading = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=True)
-        self.loading_partidos = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False) 
-        self.loading_pronosticos = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False) 
-        self.loading_admin = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
-        self.loading_torneos_admin = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False) 
-
-        # --- TÍTULOS DINÁMICOS ---
-        self.txt_titulo_partidos = ft.Text("Partidos por jugar", size=28, weight=ft.FontWeight.BOLD, color="white")
-        self.txt_titulo_pronosticos = ft.Text("Todos los pronósticos", size=28, weight=ft.FontWeight.BOLD, color="white") 
-
-        # --- BOTONES FILTROS PARTIDOS ---
-        self.btn_todos = ft.ElevatedButton("Todos", icon=ft.Icons.LIST, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro('todos'))
-        self.btn_jugados = ft.ElevatedButton("Jugados", icon=ft.Icons.HISTORY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro('jugados'))
-        self.btn_por_jugar = ft.ElevatedButton("Por jugar", icon=ft.Icons.UPCOMING, bgcolor="blue", color="white", on_click=lambda _: self._cambiar_filtro('futuros'))
-        self.btn_por_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", on_click=self._abrir_selector_torneo)
-        self.btn_sin_pronosticar = ft.ElevatedButton("Sin pronosticar", icon=ft.Icons.EVENT_BUSY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro('sin_pronosticar'))
-        self.btn_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=self._abrir_selector_equipo)
-
-        # --- BOTONES FILTROS PRONÓSTICOS ---
-        self.btn_pron_todos = ft.ElevatedButton("Todos", icon=ft.Icons.LIST, bgcolor="blue", color="white", on_click=lambda _: self._cambiar_filtro_tiempo('todos'))
-        self.btn_pron_por_jugar = ft.ElevatedButton("Por jugar", icon=ft.Icons.UPCOMING, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo('futuros'))
-        self.btn_pron_jugados = ft.ElevatedButton("Jugados", icon=ft.Icons.HISTORY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo('jugados'))
-        
-        self.btn_pron_por_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('torneo'))
-        self.btn_pron_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('equipo'))
-        self.btn_pron_por_usuario = ft.ElevatedButton("Por usuario", icon=ft.Icons.PERSON, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('usuario'))
 
         # --- CONTROLES FORMULARIO PARTIDOS ---
         self.txt_instruccion = ft.Text("1. Seleccione un Torneo en la tabla inferior", size=12, italic=True, color="yellow", visible=False)
@@ -432,75 +367,196 @@ class SistemaIndependiente:
         self.btn_del_torneo = ft.IconButton(icon=ft.Icons.DELETE, icon_color="red", tooltip="Eliminar Seleccionado", on_click=self._eliminar_torneo)
         self.btn_clean_torneo = ft.IconButton(icon=ft.Icons.CLEANING_SERVICES, icon_color="grey", tooltip="Limpiar Formulario", on_click=self._limpiar_formulario_torneo)
 
-        # --- PESTAÑAS ---
+        # --- TÍTULOS DINÁMICOS ---
+        self.txt_titulo_ranking = ft.Text("Tabla de Posiciones", size=28, weight=ft.FontWeight.BOLD, color="white")
+        self.txt_titulo_partidos = ft.Text("Partidos por jugar", size=28, weight=ft.FontWeight.BOLD, color="white")
+        self.txt_titulo_pronosticos = ft.Text("Todos los pronósticos", size=28, weight=ft.FontWeight.BOLD, color="white") 
+
+        # --- BOTONES FILTROS PARTIDOS ---
+        self.btn_todos = ft.ElevatedButton("Todos", icon=ft.Icons.LIST, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro('todos'))
+        self.btn_jugados = ft.ElevatedButton("Jugados", icon=ft.Icons.HISTORY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro('jugados'))
+        self.btn_por_jugar = ft.ElevatedButton("Por jugar", icon=ft.Icons.UPCOMING, bgcolor="blue", color="white", on_click=lambda _: self._cambiar_filtro('futuros'))
+        self.btn_por_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", on_click=self._abrir_selector_torneo)
+        self.btn_sin_pronosticar = ft.ElevatedButton("Sin pronosticar", icon=ft.Icons.EVENT_BUSY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro('sin_pronosticar'))
+        self.btn_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=self._abrir_selector_equipo)
+
+        # --- BOTONES FILTROS PRONÓSTICOS ---
+        self.btn_pron_todos = ft.ElevatedButton("Todos", icon=ft.Icons.LIST, bgcolor="blue", color="white", on_click=lambda _: self._cambiar_filtro_tiempo('todos'))
+        self.btn_pron_por_jugar = ft.ElevatedButton("Por jugar", icon=ft.Icons.UPCOMING, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo('futuros'))
+        self.btn_pron_jugados = ft.ElevatedButton("Jugados", icon=ft.Icons.HISTORY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo('jugados'))
+        
+        self.btn_pron_por_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('torneo'))
+        self.btn_pron_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('equipo'))
+        self.btn_pron_por_usuario = ft.ElevatedButton("Por usuario", icon=ft.Icons.PERSON, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('usuario'))
+
+        # --- DEFINICIÓN DE COLUMNAS ---
+        columnas_partidos = [ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Tu pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Tus puntos", color="green", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center))]
+
+        columnas_pronosticos = [
+            ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Fecha Predicción", color="white70", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Puntos", color="green", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center), numeric=True, on_sort=self._ordenar_tabla_pronosticos)
+        ]
+
+        # Ancho columna usuario
+        ancho_usuario = 110 
+        
+        columnas_estadisticas = [
+            ft.DataColumn(ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), numeric=True), 
+            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center_left)), 
+            ft.DataColumn(ft.Text("Puntos\nTotales", color="yellow", weight=ft.FontWeight.BOLD), numeric=True), 
+            ft.DataColumn(ft.Text("Pts.\nGanador", color="white"), numeric=True), 
+            ft.DataColumn(ft.Text("Pts.\nGoles CAI", color="white"), numeric=True), 
+            ft.DataColumn(ft.Text("Pts.\nGoles Rival", color="white"), numeric=True)
+        ]
+
+        # Columnas Torneos Ganados
+        columnas_copas = [
+            ft.DataColumn(ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), numeric=True),
+            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center_left)),
+            ft.DataColumn(ft.Container(content=ft.Text("Torneos ganados", color="yellow", weight=ft.FontWeight.BOLD), width=120, alignment=ft.alignment.center), numeric=True)
+        ]
+
+        # --- DEFINICIÓN DE TABLAS ---
+        self.tabla_estadisticas_header = ft.DataTable(width=720, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=15, columns=columnas_estadisticas, rows=[])
+        self.tabla_estadisticas = ft.DataTable(width=720, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
+        
+        self.tabla_copas_header = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_copas, rows=[])
+        self.tabla_copas = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_copas, rows=[])
+
+        self.tabla_partidos_header = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_partidos, rows=[])
+        self.tabla_partidos = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_partidos, rows=[])
+
+        self.tabla_pronosticos_header = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_pronosticos, rows=[])
+        
+        self.tabla_pronosticos = ft.DataTable(
+            bgcolor="#2D2D2D", 
+            border=ft.border.all(1, "white10"), 
+            border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), 
+            vertical_lines=ft.border.BorderSide(1, "white10"), 
+            horizontal_lines=ft.border.BorderSide(1, "white10"), 
+            heading_row_height=0, 
+            data_row_max_height=60, 
+            column_spacing=20, 
+            columns=columnas_pronosticos, 
+            sort_column_index=self.pronosticos_sort_col_index,
+            sort_ascending=self.pronosticos_sort_asc,
+            rows=[]
+        )
+        
+        self.tabla_partidos_admin = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=60, column_spacing=20, show_checkbox_column=False, columns=[ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=230, alignment=ft.alignment.center_left))], rows=[])
+        self.tabla_torneos = ft.DataTable(width=450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=60, data_row_max_height=50, column_spacing=20, show_checkbox_column=False, columns=[ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Año", color="yellow", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center_left), numeric=True)], rows=[])
+
+        # --- DEFINICIÓN DE PESTAÑAS ---
         lista_pestanas = [
-            # Pestaña Estadísticas
             ft.Tab(
-                text="Estadísticas", 
-                icon="bar_chart", 
+                text="Estadísticas", icon="bar_chart",
                 content=ft.Container(
+                    padding=20, alignment=ft.alignment.top_left,
                     content=ft.Column(
-                        controls=[
-                            ft.Text("Tabla de Posiciones", size=28, weight=ft.FontWeight.BOLD, color="white"), 
-                            self.loading, 
-                            # TABLA RANKING
-                            ft.Container(
-                                height=260, 
-                                content=ft.Column(
-                                    spacing=0, 
-                                    controls=[
-                                        self.tabla_estadisticas_header, 
-                                        ft.Container(
-                                            height=180, 
-                                            content=ft.Column(
-                                                controls=[self.tabla_estadisticas], 
-                                                scroll=ft.ScrollMode.ALWAYS
+                        scroll=ft.ScrollMode.AUTO, controls=[
+                            self.txt_titulo_ranking, 
+                            self.loading,
+                            # ESTRUCTURA DE TABLA CON CONTENEDOR TIPO "LABELFRAME" A LA DERECHA
+                            ft.Row(
+                                vertical_alignment=ft.CrossAxisAlignment.START,
+                                controls=[
+                                    # Columna que contiene la tabla (Encabezado + Cuerpo Scrollable)
+                                    ft.Column(
+                                        spacing=0,
+                                        controls=[
+                                            self.tabla_estadisticas_header,
+                                            ft.Container(
+                                                height=180, 
+                                                content=ft.Column(
+                                                    scroll=ft.ScrollMode.ALWAYS, 
+                                                    controls=[self.tabla_estadisticas]
+                                                )
                                             )
-                                        )
-                                    ]
-                                )
+                                        ]
+                                    ),
+                                    # Contenedor de Filtros ("Labelframe")
+                                    ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_filtro_torneo)
+                                ]
                             ),
+                            
                             ft.Container(height=10),
                             ft.Text("Torneos ganados", size=24, weight=ft.FontWeight.BOLD, color="white"),
-                            # TABLA TORNEOS GANADOS
+                            self.loading_copas, # BARRA DE CARGA
                             ft.Container(
-                                height=260, 
-                                content=ft.Column(
-                                    spacing=0, 
-                                    controls=[
-                                        self.tabla_copas_header, 
-                                        ft.Container(
-                                            height=180, 
-                                            content=ft.Column(
-                                                controls=[self.tabla_copas], 
-                                                scroll=ft.ScrollMode.ALWAYS
-                                            )
-                                        )
+                                height=260, content=ft.Column(
+                                    spacing=0, controls=[
+                                        self.tabla_copas_header,
+                                        ft.Container(height=180, content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_copas]))
                                     ]
                                 )
                             )
-                        ], 
-                        scroll=ft.ScrollMode.AUTO, 
-                        horizontal_alignment=ft.CrossAxisAlignment.START
-                    ), 
-                    padding=20, 
-                    alignment=ft.alignment.top_left
+                        ]
+                    )
                 )
             ),
-            
-            # Pestaña Partidos
-            ft.Tab(text="Partidos", icon="sports_soccer", content=ft.Container(content=ft.Column(controls=[self.txt_titulo_partidos, self.loading_partidos, ft.Row(vertical_alignment=ft.CrossAxisAlignment.START, controls=[ft.Container(height=380, content=ft.Row(controls=[ft.Column(spacing=0, controls=[self.tabla_partidos_header, ft.Container(height=310, content=ft.Column(controls=[self.tabla_partidos], scroll=ft.ScrollMode.ALWAYS))])], scroll=ft.ScrollMode.ALWAYS)), ft.Container(width=10), ft.Container(width=200, padding=10, border=ft.border.all(1, "white10"), border_radius=8, bgcolor="#1E1E1E", content=ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=15, controls=[ft.Text("Tu Pronóstico", size=16, weight=ft.FontWeight.BOLD), self.input_pred_cai, self.input_pred_rival, self.btn_pronosticar]))]), ft.Container(height=10), ft.Row(controls=[self.btn_todos, self.btn_por_jugar, self.btn_jugados, self.btn_por_torneo, self.btn_sin_pronosticar, self.btn_por_equipo], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER)], scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.START), padding=20, alignment=ft.alignment.top_left)),
-            
-            # Pestaña Pronósticos
             ft.Tab(
-                text="Pronósticos", 
-                icon="list_alt", 
+                text="Partidos", icon="sports_soccer", 
+                content=ft.Container(
+                    content=ft.Column(
+                        controls=[
+                            self.txt_titulo_partidos, 
+                            self.loading_partidos, 
+                            ft.Row(
+                                vertical_alignment=ft.CrossAxisAlignment.START, 
+                                controls=[
+                                    ft.Container(
+                                        height=380, 
+                                        content=ft.Row(
+                                            controls=[
+                                                ft.Column(
+                                                    spacing=0, 
+                                                    controls=[
+                                                        self.tabla_partidos_header, 
+                                                        ft.Container(height=310, content=ft.Column(controls=[self.tabla_partidos], scroll=ft.ScrollMode.ALWAYS))
+                                                    ]
+                                                )
+                                            ], 
+                                            scroll=ft.ScrollMode.ALWAYS
+                                        )
+                                    ), 
+                                    ft.Container(width=10), 
+                                    ft.Container(
+                                        width=200, padding=10, border=ft.border.all(1, "white10"), border_radius=8, bgcolor="#1E1E1E", 
+                                        content=ft.Column(
+                                            horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=15, 
+                                            controls=[
+                                                ft.Text("Tu Pronóstico", size=16, weight=ft.FontWeight.BOLD), 
+                                                self.input_pred_cai, 
+                                                self.input_pred_rival, 
+                                                self.btn_pronosticar
+                                            ]
+                                        )
+                                    )
+                                ]
+                            ), 
+                            ft.Container(height=10), 
+                            ft.Row(
+                                controls=[self.btn_todos, self.btn_por_jugar, self.btn_jugados, self.btn_por_torneo, self.btn_sin_pronosticar, self.btn_por_equipo], 
+                                alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER
+                            )
+                        ], 
+                        scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.START
+                    ), padding=20, alignment=ft.alignment.top_left
+                )
+            ),
+            ft.Tab(
+                text="Pronósticos", icon="list_alt", 
                 content=ft.Container(
                     content=ft.Column(
                         controls=[
                             self.txt_titulo_pronosticos,
                             self.loading_pronosticos, 
-                            
                             ft.Container(
                                 height=440,
                                 content=ft.Column(
@@ -517,7 +573,6 @@ class SistemaIndependiente:
                                     ]
                                 )
                             ),
-                            # FILA DE BOTONES
                             ft.Container(height=10),
                             ft.Row(
                                 controls=[
@@ -539,16 +594,14 @@ class SistemaIndependiente:
                     alignment=ft.alignment.top_left
                 )
             ),
-            
             ft.Tab(text="Configuración", icon="settings", content=ft.Container(content=ft.Column(controls=[ft.Icon(name="settings_applications", size=80, color="white"), ft.Text("Configuración", size=30, color="white")], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER), alignment=ft.alignment.center))
         ]
 
         if usuario == "Gabriel":
             lista_pestanas.append(ft.Tab(text="Administración", icon="admin_panel_settings", content=ft.Container(padding=0, alignment=ft.alignment.top_left, content=ft.Column(scroll=ft.ScrollMode.AUTO, controls=[ft.Container(padding=20, content=ft.Column(controls=[ft.Row(vertical_alignment=ft.CrossAxisAlignment.START, controls=[ft.Column(controls=[self.loading_admin, ft.Text("Partidos Registrados", size=20, weight=ft.FontWeight.BOLD, color="white"), ft.Container(content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_partidos_admin]), height=350, width=720),]), ft.Container(width=30), ft.Container(width=380, padding=20, border=ft.border.all(1, "white24"), border_radius=10, bgcolor="#1E1E1E", content=ft.Column(tight=True, spacing=15, controls=[ft.Text("Agregar / Editar Partido", size=18, weight=ft.FontWeight.BOLD, color="white"), ft.Divider(color="white24"), self.txt_instruccion, ft.Row(controls=[ft.Text("Rival:", width=60, color="white", weight=ft.FontWeight.BOLD), self.input_rival], alignment=ft.MainAxisAlignment.START), ft.Row(controls=[ft.Text("Fecha:", width=50, color="white", weight=ft.FontWeight.BOLD), self.btn_pick_date, self.txt_fecha_display, ft.Container(width=10), ft.Text("Hora:", width=45, color="white", weight=ft.FontWeight.BOLD), self.btn_pick_time, self.txt_hora_display], alignment=ft.MainAxisAlignment.START), ft.Row(controls=[ft.Text("Goles CAI:", width=80, color="white", weight=ft.FontWeight.BOLD), self.input_goles_cai]), ft.Row(controls=[ft.Text("Goles Rival:", width=80, color="white", weight=ft.FontWeight.BOLD), self.input_goles_rival]), ft.Container(height=10), ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[self.btn_add_partido, ft.Row(spacing=5, controls=[self.btn_edit_partido, self.btn_del_partido, self.btn_clean_partido])])]))]), ft.Container(height=40), ft.Row(vertical_alignment=ft.CrossAxisAlignment.START, controls=[ft.Column(controls=[self.loading_torneos_admin, ft.Text("Torneos Registrados", size=20, weight=ft.FontWeight.BOLD, color="white"), ft.Container(content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_torneos]), height=300, width=480)]), ft.Container(width=30), ft.Container(width=450, padding=20, border=ft.border.all(1, "white24"), border_radius=10, bgcolor="#1E1E1E", content=ft.Column(tight=True, spacing=15, controls=[ft.Text("Gestión de Torneos", size=18, weight=ft.FontWeight.BOLD, color="white"), ft.Divider(color="white24"), ft.Row(controls=[self.input_torneo_nombre, self.dd_torneo_anio], alignment=ft.MainAxisAlignment.SPACE_BETWEEN), ft.Container(height=10), ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[self.btn_add_torneo, ft.Row(spacing=5, controls=[self.btn_edit_torneo, self.btn_del_torneo, self.btn_clean_torneo])])]))])]))]))))
 
-        mis_pestanas = ft.Tabs(selected_index=0, animation_duration=300, expand=True, indicator_color="white", label_color="white", unselected_label_color="white54", divider_color="white", tabs=lista_pestanas)
+        mis_pestanas = ft.Tabs(selected_index=0, expand=True, tabs=lista_pestanas)
         self.page.add(mis_pestanas)
-        
         self._recargar_datos(actualizar_partidos=True, actualizar_torneos=True, actualizar_admin=True, actualizar_pronosticos=True, actualizar_ranking=True)
 
     def _ordenar_tabla_pronosticos(self, e):
@@ -788,6 +841,59 @@ class SistemaIndependiente:
             self.page.close(self.dlg_modal_usuario)
             self._recargar_datos(actualizar_pronosticos=True)
 
+    def _abrir_selector_torneo_ranking(self, e):
+        # Reutilizamos el diseño del modal de torneos
+        self.lv_torneos = ft.ListView(expand=True, spacing=5, height=200)
+        self.lv_anios = ft.ListView(expand=True, spacing=5, height=200)
+        
+        self.btn_ver_torneo = ft.ElevatedButton("Ver", icon=ft.Icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_torneo_ranking)
+        
+        def _cargar_datos_modal():
+            try:
+                bd = BaseDeDatos()
+                ediciones = bd.obtener_ediciones()
+                self.cache_ediciones_modal = ediciones
+                nombres_unicos = sorted(list(set(e[1] for e in ediciones)))
+                
+                controles = []
+                for nombre in nombres_unicos:
+                    controles.append(ft.ListTile(title=ft.Text(nombre, size=14), data=nombre, on_click=self._seleccionar_campeonato_modal, bgcolor="#2D2D2D", shape=ft.RoundedRectangleBorder(radius=5)))
+                self.lv_torneos.controls = controles
+                self.lv_torneos.update()
+            except Exception as ex:
+                print(f"Error cargando modal: {ex}")
+
+        contenido_modal = ft.Container(width=500, height=300, content=ft.Row(controls=[ft.Column(expand=1, controls=[ft.Text("Torneo", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_torneos, border=ft.border.all(1, "white24"), border_radius=5, padding=5)]), ft.VerticalDivider(width=20, color="white24"), ft.Column(expand=1, controls=[ft.Text("Año", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_anios, border=ft.border.all(1, "white24"), border_radius=5, padding=5)])]))
+
+        self.dlg_modal = ft.AlertDialog(modal=True, title=ft.Text("Filtrar Ranking por Torneo"), content=contenido_modal, actions=[ft.TextButton("Cancelar", on_click=lambda e: self.page.close(self.dlg_modal)), self.btn_ver_torneo], actions_alignment=ft.MainAxisAlignment.END)
+        self.page.open(self.dlg_modal)
+        threading.Thread(target=_cargar_datos_modal, daemon=True).start()
+
+    def _confirmar_filtro_torneo_ranking(self, e):
+        """Busca el ID de la edición seleccionada y aplica el filtro al ranking"""
+        if self.temp_campeonato_sel and self.temp_anio_sel:
+            edicion_encontrada = None
+            for ed in self.cache_ediciones_modal:
+                if ed[1] == self.temp_campeonato_sel and ed[2] == self.temp_anio_sel:
+                    edicion_encontrada = ed[0] 
+                    break
+            
+            if edicion_encontrada:
+                # Establecer filtro
+                self.filtro_ranking_edicion_id = edicion_encontrada
+                # Formato solicitado: nombre torneo espacio año
+                self.filtro_ranking_nombre = f"{self.temp_campeonato_sel} {self.temp_anio_sel}"
+                
+                # Actualizar Título
+                self.txt_titulo_ranking.value = f"Tabla de posiciones {self.filtro_ranking_nombre}"
+                self.txt_titulo_ranking.update()
+                
+                self.btn_ranking_torneo.bgcolor = "blue"
+                self.btn_ranking_torneo.update()
+                
+                self.page.close(self.dlg_modal)
+                self._recargar_datos(actualizar_ranking=True)
+
     def _abrir_selector_equipo_pronosticos(self, e):
         self.lv_equipos = ft.ListView(expand=True, spacing=5, height=300)
         # El botón llama a _confirmar_filtro_equipo_pronosticos
@@ -823,6 +929,7 @@ class SistemaIndependiente:
 
         if actualizar_ranking:
             self.loading.visible = True
+            self.loading_copas.visible = True # ACTIVAR CARGA COPAS
         if actualizar_partidos:
             self.loading_partidos.visible = True
             self._bloquear_botones_filtros(True) 
@@ -857,13 +964,14 @@ class SistemaIndependiente:
                 
                 # --- 0. RANKING Y COPAS ---
                 if actualizar_ranking:
-                    # Ranking General
-                    datos_ranking = bd.obtener_ranking()
+                    # Ranking General o por Torneo
+                    datos_ranking = bd.obtener_ranking(edicion_id=self.filtro_ranking_edicion_id)
                     filas_tabla_ranking = []
                     for i, fila in enumerate(datos_ranking, start=1):
                         filas_tabla_ranking.append(ft.DataRow(cells=[
                             ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")), 
-                            ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=80, alignment=ft.alignment.center_left)), 
+                            # (Debe ser el mismo que arriba, ej: 110)
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=110, alignment=ft.alignment.center_left)), 
                             ft.DataCell(ft.Text(str(fila[1]), weight=ft.FontWeight.BOLD, color="yellow", size=16)), 
                             ft.DataCell(ft.Text(str(fila[2]), color="white70")), 
                             ft.DataCell(ft.Text(str(fila[3]), color="white70")), 
@@ -871,7 +979,7 @@ class SistemaIndependiente:
                         ]))
                     self.tabla_estadisticas.rows = filas_tabla_ranking
                     
-                    # NUEVO: Tabla Torneos Ganados
+                    # Tabla Torneos Ganados
                     datos_copas = bd.obtener_torneos_ganados()
                     filas_copas = []
                     for i, fila in enumerate(datos_copas, start=1):
@@ -879,8 +987,9 @@ class SistemaIndependiente:
                         cantidad_copas = fila[1]
                         filas_copas.append(ft.DataRow(cells=[
                             ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")),
-                            ft.DataCell(ft.Container(content=ft.Text(str(usuario_copa), weight=ft.FontWeight.BOLD, color="white"), width=200, alignment=ft.alignment.center_left)),
-                            ft.DataCell(ft.Container(content=ft.Text(str(cantidad_copas), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=150, alignment=ft.alignment.center))
+                            # (Debe ser el mismo que arriba, ej: 110)
+                            ft.DataCell(ft.Container(content=ft.Text(str(usuario_copa), weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(cantidad_copas), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=120, alignment=ft.alignment.center))
                         ]))
                     self.tabla_copas.rows = filas_copas
 
@@ -889,7 +998,7 @@ class SistemaIndependiente:
                     datos_partidos_user = bd.obtener_partidos(
                         self.usuario_actual, 
                         filtro=self.filtro_partidos, 
-                        edicion_id=self.filtro_edicion_id,
+                        edicion_id=self.filtro_edicion_id, 
                         rival_id=self.filtro_rival_id
                     )
                     filas_tabla_partidos = []
@@ -1059,6 +1168,7 @@ class SistemaIndependiente:
             finally:
                 self.editando_torneo = False
                 self.loading.visible = False
+                self.loading_copas.visible = False # OCULTAR BARRA COPAS
                 self.loading_partidos.visible = False
                 self.loading_pronosticos.visible = False 
                 self.loading_admin.visible = False
@@ -1340,8 +1450,8 @@ class SistemaIndependiente:
         self.btn_ver_torneo.update()
 
     
-    def _confirmar_filtro_torneo(self, e):
-        """Busca el ID de la edición seleccionada y aplica el filtro"""
+    def _confirmar_filtro_torneo_ranking(self, e):
+        """Busca el ID de la edición seleccionada y aplica el filtro al ranking"""
         if self.temp_campeonato_sel and self.temp_anio_sel:
             edicion_encontrada = None
             for ed in self.cache_ediciones_modal:
@@ -1350,28 +1460,20 @@ class SistemaIndependiente:
                     break
             
             if edicion_encontrada:
-                self.filtro_partidos = 'torneo'
-                self.filtro_edicion_id = edicion_encontrada
+                # Establecer filtro
+                self.filtro_ranking_edicion_id = edicion_encontrada
+                # Formato solicitado: nombre torneo espacio año (SIN PARÉNTESIS)
+                self.filtro_ranking_nombre = f"{self.temp_campeonato_sel} {self.temp_anio_sel}"
                 
                 # Actualizar Título
-                self.txt_titulo_partidos.value = f"Partidos del torneo {self.temp_campeonato_sel} {self.temp_anio_sel}"
-                self.txt_titulo_partidos.update()
+                self.txt_titulo_ranking.value = f"Tabla de posiciones {self.filtro_ranking_nombre}"
+                self.txt_titulo_ranking.update()
                 
-                # Actualizar botones
-                self.btn_todos.bgcolor = "#333333"
-                self.btn_jugados.bgcolor = "#333333"
-                self.btn_por_jugar.bgcolor = "#333333"
-                self.btn_por_torneo.bgcolor = "blue"
-                self.btn_sin_pronosticar.bgcolor = "#333333"
-                
-                self.btn_todos.update()
-                self.btn_jugados.update()
-                self.btn_por_jugar.update()
-                self.btn_por_torneo.update()
-                self.btn_sin_pronosticar.update()
+                self.btn_ranking_torneo.bgcolor = "blue"
+                self.btn_ranking_torneo.update()
                 
                 self.page.close(self.dlg_modal)
-                self._recargar_datos(actualizar_partidos=True)
+                self._recargar_datos(actualizar_ranking=True)
 
     # --- FUNCIONES ABM TORNEOS ---
     def _limpiar_formulario_torneo(self, e=None):

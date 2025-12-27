@@ -58,15 +58,25 @@ class BaseDeDatos:
             else:
                 raise Exception(f"Error de Conexión: {msg}")
 
-    def obtener_ranking(self):
+    def obtener_ranking(self, edicion_id=None):
         """
-        Calcula el ranking filtrando SOLO el último pronóstico de cada usuario por partido.
+        Calcula el ranking. 
+        Si edicion_id es None, calcula el global.
+        Si se pasa un ID, filtra los puntos solo para los partidos de ese torneo.
         """
         conexion = None
         cursor = None
         try:
             conexion = self.abrir()
             cursor = conexion.cursor() 
+
+            # Condición de filtro extra para el JOIN
+            filtro_torneo = ""
+            params = []
+            
+            if edicion_id is not None:
+                filtro_torneo = " AND p.edicion_id = %s "
+                params.append(edicion_id)
 
             sql = f"""
             SELECT 
@@ -89,7 +99,7 @@ class BaseDeDatos:
                 COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival
 
             FROM usuarios u
-            -- CORRECCIÓN: Subconsulta para obtener SOLO el último pronóstico por usuario y partido
+            -- Subconsulta para último pronóstico
             LEFT JOIN (
                 SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
                 FROM pronosticos p1
@@ -102,13 +112,14 @@ class BaseDeDatos:
                     AND p1.fecha_prediccion = p2.max_fecha
             ) pr ON u.id = pr.usuario_id
             
-            LEFT JOIN partidos p ON pr.partido_id = p.id AND p.goles_independiente IS NOT NULL
+            -- JOIN con Partidos aplicando el filtro de torneo si existe
+            LEFT JOIN partidos p ON pr.partido_id = p.id AND p.goles_independiente IS NOT NULL {filtro_torneo}
             
             GROUP BY u.id, u.username
             ORDER BY total DESC;
             """
             
-            cursor.execute(sql)
+            cursor.execute(sql, tuple(params))
             resultados = cursor.fetchall()
             return resultados
 
@@ -435,8 +446,9 @@ class BaseDeDatos:
 
     def obtener_torneos_ganados(self):
         """
-        Calcula cuántos torneos (ediciones) ha ganado cada usuario.
-        Se considera ganador al que tiene el máximo puntaje acumulado en una edición.
+        Calcula cuántos torneos ha ganado cada usuario.
+        Solo cuenta torneos marcados como FINALIZADOS (e.finalizado = TRUE).
+        Incluye a todos los usuarios, mostrando 0 si no ganaron ninguno.
         """
         conexion = None
         cursor = None
@@ -444,64 +456,53 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            # Usamos CTEs para:
-            # 1. Calcular puntos por usuario por edición
-            # 2. Encontrar el puntaje máximo de cada edición
-            # 3. Contar cuántas veces un usuario alcanzó ese máximo
             sql = f"""
             WITH PuntosPorUsuarioEdicion AS (
                 SELECT 
                     u.username,
                     p.edicion_id,
                     SUM(
-                        CASE 
-                            WHEN p.goles_independiente IS NULL THEN 0
-                            ELSE
-                                (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
-                                (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
-                                (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
-                        END
+                        (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
                     ) as total_puntos
                 FROM usuarios u
-                JOIN (
-                    SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
-                    FROM pronosticos p1
-                    INNER JOIN (
-                        SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
-                        FROM pronosticos
-                        GROUP BY usuario_id, partido_id
-                    ) p2 ON p1.usuario_id = p2.usuario_id 
-                        AND p1.partido_id = p2.partido_id 
-                        AND p1.fecha_prediccion = p2.max_fecha
-                ) pr ON u.id = pr.usuario_id
+                JOIN pronosticos pr ON u.id = pr.usuario_id
                 JOIN partidos p ON pr.partido_id = p.id
-                WHERE p.goles_independiente IS NOT NULL
+                JOIN ediciones e ON p.edicion_id = e.id
+                WHERE p.goles_independiente IS NOT NULL 
+                  AND e.finalizado = TRUE  -- SOLO TORNEOS FINALIZADOS
                 GROUP BY u.username, p.edicion_id
             ),
             MaximosPorEdicion AS (
                 SELECT edicion_id, MAX(total_puntos) as max_pts
                 FROM PuntosPorUsuarioEdicion
                 GROUP BY edicion_id
+            ),
+            GanadoresPorEdicion AS (
+                SELECT p.username, p.edicion_id
+                FROM PuntosPorUsuarioEdicion p
+                JOIN MaximosPorEdicion m ON p.edicion_id = m.edicion_id AND p.total_puntos = m.max_pts
+                WHERE m.max_pts > 0
             )
             SELECT 
-                p.username,
-                COUNT(*) as copas
-            FROM PuntosPorUsuarioEdicion p
-            JOIN MaximosPorEdicion m ON p.edicion_id = m.edicion_id AND p.total_puntos = m.max_pts
-            WHERE m.max_pts > 0
-            GROUP BY p.username
-            ORDER BY copas DESC, p.username ASC
+                u.username,
+                COUNT(g.edicion_id) as copas
+            FROM usuarios u
+            LEFT JOIN GanadoresPorEdicion g ON u.username = g.username
+            GROUP BY u.username
+            ORDER BY copas DESC, u.username ASC
             """
             
             cursor.execute(sql)
             return cursor.fetchall()
         except Exception as e:
-            logger.error(f"Error obteniendo torneos ganados: {e}")
+            logger.error(f"Error obteniendo historial de campeones: {e}")
             return []
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-            
+
     def obtener_usuarios(self):
         """Obtiene la lista de nombres de usuario registrados."""
         conexion = None
