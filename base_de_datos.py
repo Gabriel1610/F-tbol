@@ -649,7 +649,7 @@ class BaseDeDatos:
 
     def obtener_ediciones(self):
         """
-        Obtiene las ediciones de torneos (ID, Nombre, Año).
+        Obtiene las ediciones de torneos (ID, Nombre, Año, Finalizado).
         Ordenado por año descendente y nombre.
         """
         conexion = None
@@ -658,8 +658,9 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
             
+            # AGREGAMOS e.finalizado a la consulta
             sql = """
-            SELECT e.id, c.nombre, a.numero
+            SELECT e.id, c.nombre, a.numero, e.finalizado
             FROM ediciones e
             JOIN campeonatos c ON e.campeonato_id = c.id
             JOIN anios a ON e.anio_id = a.id
@@ -674,7 +675,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-    
+
     def eliminar_torneo(self, id_edicion):
         """
         Elimina una edición. Fallará si tiene partidos asociados (FK RESTRICT).
@@ -701,10 +702,9 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    def editar_torneo(self, id_edicion, nuevo_nombre, nuevo_anio):
+    def editar_torneo(self, id_edicion, nuevo_nombre, nuevo_anio, nuevo_finalizado):
         """
-        Actualiza una edición existente.
-        Busca/Crea el campeonato y el año, y actualiza la referencia en la tabla ediciones.
+        Actualiza una edición existente, incluyendo su estado de finalización.
         """
         conexion = None
         cursor = None
@@ -712,7 +712,7 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            # 1. Gestionar AÑO (Igual que en crear)
+            # 1. Gestionar AÑO
             cursor.execute("SELECT id FROM anios WHERE numero = %s", (nuevo_anio,))
             res_anio = cursor.fetchone()
             if res_anio:
@@ -721,7 +721,7 @@ class BaseDeDatos:
                 cursor.execute("INSERT INTO anios (numero) VALUES (%s)", (nuevo_anio,))
                 anio_id = cursor.lastrowid
 
-            # 2. Gestionar CAMPEONATO (Igual que en crear)
+            # 2. Gestionar CAMPEONATO
             cursor.execute("SELECT id FROM campeonatos WHERE nombre = %s", (nuevo_nombre,))
             res_camp = cursor.fetchone()
             if res_camp:
@@ -732,8 +732,8 @@ class BaseDeDatos:
 
             # 3. ACTUALIZAR la edición
             try:
-                sql = "UPDATE ediciones SET campeonato_id = %s, anio_id = %s WHERE id = %s"
-                cursor.execute(sql, (campeonato_id, anio_id, id_edicion))
+                sql = "UPDATE ediciones SET campeonato_id = %s, anio_id = %s, finalizado = %s WHERE id = %s"
+                cursor.execute(sql, (campeonato_id, anio_id, nuevo_finalizado, id_edicion))
                 conexion.commit()
                 return True
             except mysql.connector.IntegrityError as e:
@@ -748,7 +748,7 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    def crear_torneo(self, nombre_campeonato, anio):
+    def crear_torneo(self, nombre_campeonato, anio, finalizado=False):
         """
         Crea una edición de torneo.
         Si el 'año' o el 'campeonato' (nombre) no existen, los crea automáticamente.
@@ -760,7 +760,6 @@ class BaseDeDatos:
             cursor = conexion.cursor()
 
             # 1. Gestionar el AÑO
-            # Verificamos si existe, si no, lo insertamos.
             cursor.execute("SELECT id FROM anios WHERE numero = %s", (anio,))
             res_anio = cursor.fetchone()
             if res_anio:
@@ -769,8 +768,7 @@ class BaseDeDatos:
                 cursor.execute("INSERT INTO anios (numero) VALUES (%s)", (anio,))
                 anio_id = cursor.lastrowid
 
-            # 2. Gestionar el CAMPEONATO (Nombre)
-            # Verificamos si existe, si no, lo insertamos.
+            # 2. Gestionar el CAMPEONATO
             cursor.execute("SELECT id FROM campeonatos WHERE nombre = %s", (nombre_campeonato,))
             res_camp = cursor.fetchone()
             if res_camp:
@@ -779,15 +777,14 @@ class BaseDeDatos:
                 cursor.execute("INSERT INTO campeonatos (nombre) VALUES (%s)", (nombre_campeonato,))
                 campeonato_id = cursor.lastrowid
 
-            # 3. Insertar la EDICIÓN (La unión de ambos)
-            # Usamos INSERT IGNORE o manejamos el error si ya existe esa combinación
+            # 3. Insertar la EDICIÓN con el campo finalizado
             try:
-                sql = "INSERT INTO ediciones (campeonato_id, anio_id) VALUES (%s, %s)"
-                cursor.execute(sql, (campeonato_id, anio_id))
+                sql = "INSERT INTO ediciones (campeonato_id, anio_id, finalizado) VALUES (%s, %s, %s)"
+                cursor.execute(sql, (campeonato_id, anio_id, finalizado))
                 conexion.commit()
                 return True
             except mysql.connector.IntegrityError as e:
-                if e.errno == 1062: # Duplicate entry
+                if e.errno == 1062: 
                     raise Exception(f"El torneo '{nombre_campeonato} {anio}' ya existe.")
                 raise e
 
