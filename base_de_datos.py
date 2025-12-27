@@ -433,6 +433,75 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
+    def obtener_torneos_ganados(self):
+        """
+        Calcula cuántos torneos (ediciones) ha ganado cada usuario.
+        Se considera ganador al que tiene el máximo puntaje acumulado en una edición.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            # Usamos CTEs para:
+            # 1. Calcular puntos por usuario por edición
+            # 2. Encontrar el puntaje máximo de cada edición
+            # 3. Contar cuántas veces un usuario alcanzó ese máximo
+            sql = f"""
+            WITH PuntosPorUsuarioEdicion AS (
+                SELECT 
+                    u.username,
+                    p.edicion_id,
+                    SUM(
+                        CASE 
+                            WHEN p.goles_independiente IS NULL THEN 0
+                            ELSE
+                                (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                                (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
+                                (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
+                        END
+                    ) as total_puntos
+                FROM usuarios u
+                JOIN (
+                    SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
+                    FROM pronosticos p1
+                    INNER JOIN (
+                        SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                        FROM pronosticos
+                        GROUP BY usuario_id, partido_id
+                    ) p2 ON p1.usuario_id = p2.usuario_id 
+                        AND p1.partido_id = p2.partido_id 
+                        AND p1.fecha_prediccion = p2.max_fecha
+                ) pr ON u.id = pr.usuario_id
+                JOIN partidos p ON pr.partido_id = p.id
+                WHERE p.goles_independiente IS NOT NULL
+                GROUP BY u.username, p.edicion_id
+            ),
+            MaximosPorEdicion AS (
+                SELECT edicion_id, MAX(total_puntos) as max_pts
+                FROM PuntosPorUsuarioEdicion
+                GROUP BY edicion_id
+            )
+            SELECT 
+                p.username,
+                COUNT(*) as copas
+            FROM PuntosPorUsuarioEdicion p
+            JOIN MaximosPorEdicion m ON p.edicion_id = m.edicion_id AND p.total_puntos = m.max_pts
+            WHERE m.max_pts > 0
+            GROUP BY p.username
+            ORDER BY copas DESC, p.username ASC
+            """
+            
+            cursor.execute(sql)
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error obteniendo torneos ganados: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+            
     def obtener_usuarios(self):
         """Obtiene la lista de nombres de usuario registrados."""
         conexion = None
@@ -450,7 +519,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-            
+
     def obtener_todos_pronosticos(self):
         """
         Obtiene el listado de TODOS los pronósticos (historial completo).
