@@ -58,11 +58,10 @@ class BaseDeDatos:
             else:
                 raise Exception(f"Error de Conexión: {msg}")
 
-    def obtener_ranking(self, edicion_id=None):
+    def obtener_ranking(self, edicion_id=None, anio=None):
         """
-        Calcula el ranking. 
-        Si edicion_id es None, calcula el global.
-        Si se pasa un ID, filtra los puntos solo para los partidos de ese torneo.
+        Calcula el ranking filtrando los partidos elegibles mediante una subconsulta.
+        Esto evita errores de referencia en los JOINs y mantiene a todos los usuarios en la lista.
         """
         conexion = None
         cursor = None
@@ -70,14 +69,25 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor() 
 
-            # Condición de filtro extra para el JOIN
-            filtro_torneo = ""
+            # Construcción dinámica de la subconsulta de partidos filtrados
+            subquery_partidos = "SELECT * FROM partidos" # Base
+            joins_filtro = ""
+            where_filtro = "WHERE goles_independiente IS NOT NULL" # Siempre solo jugados
             params = []
             
             if edicion_id is not None:
-                filtro_torneo = " AND p.edicion_id = %s "
+                where_filtro += " AND edicion_id = %s"
                 params.append(edicion_id)
+            elif anio is not None:
+                # Unimos con ediciones y anios DENTRO de la subconsulta para filtrar por año
+                joins_filtro = """
+                    JOIN ediciones e ON partidos.edicion_id = e.id 
+                    JOIN anios a ON e.anio_id = a.id 
+                """
+                where_filtro += " AND a.numero = %s"
+                params.append(anio)
 
+            # Query Principal
             sql = f"""
             SELECT 
                 u.username,
@@ -99,7 +109,8 @@ class BaseDeDatos:
                 COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival
 
             FROM usuarios u
-            -- Subconsulta para último pronóstico
+            
+            -- 1. Unimos con los pronósticos del usuario
             LEFT JOIN (
                 SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
                 FROM pronosticos p1
@@ -112,16 +123,20 @@ class BaseDeDatos:
                     AND p1.fecha_prediccion = p2.max_fecha
             ) pr ON u.id = pr.usuario_id
             
-            -- JOIN con Partidos aplicando el filtro de torneo si existe
-            LEFT JOIN partidos p ON pr.partido_id = p.id AND p.goles_independiente IS NOT NULL {filtro_torneo}
+            -- 2. Unimos con la SUBCONSULTA de partidos ya filtrados (por año o torneo)
+            LEFT JOIN (
+                SELECT partidos.id, partidos.goles_independiente, partidos.goles_rival 
+                FROM partidos
+                {joins_filtro}
+                {where_filtro}
+            ) p ON pr.partido_id = p.id
             
             GROUP BY u.id, u.username
             ORDER BY total DESC;
             """
             
             cursor.execute(sql, tuple(params))
-            resultados = cursor.fetchall()
-            return resultados
+            return cursor.fetchall()
 
         except Exception as e:
             logger.error(f"Error calculando ranking en BD: {e}")
@@ -701,6 +716,121 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
+
+    def obtener_anios(self):
+        """Obtiene la lista de años disponibles en la base de datos."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            cursor.execute("SELECT id, numero FROM anios ORDER BY numero DESC")
+            return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error obteniendo años: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def obtener_ranking(self, edicion_id=None, anio=None):
+        """
+        Calcula el ranking filtrando primero los partidos válidos en una subconsulta.
+        Esto evita errores de SQL y mantiene a todos los usuarios visibles.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor() 
+
+            params = []
+
+            # 1. Construir la subconsulta de partidos filtrados
+            # Esta subconsulta devuelve SOLO los partidos que cumplen el criterio (año o torneo)
+            # y que ya se jugaron.
+            if edicion_id is not None:
+                # Filtro por Edición
+                sql_partidos_filtrados = """
+                    SELECT id, goles_independiente, goles_rival 
+                    FROM partidos 
+                    WHERE goles_independiente IS NOT NULL AND edicion_id = %s
+                """
+                params.append(edicion_id)
+                
+            elif anio is not None:
+                # Filtro por Año (requiere joins internos)
+                sql_partidos_filtrados = """
+                    SELECT p.id, p.goles_independiente, p.goles_rival 
+                    FROM partidos p
+                    JOIN ediciones e ON p.edicion_id = e.id 
+                    JOIN anios a ON e.anio_id = a.id 
+                    WHERE p.goles_independiente IS NOT NULL AND a.numero = %s
+                """
+                params.append(anio)
+                
+            else:
+                # Sin filtro (Global)
+                sql_partidos_filtrados = """
+                    SELECT id, goles_independiente, goles_rival 
+                    FROM partidos 
+                    WHERE goles_independiente IS NOT NULL
+                """
+
+            # 2. Query Principal
+            sql = f"""
+            SELECT 
+                u.username,
+                
+                -- Columna 2: Puntos Totales
+                COALESCE(SUM(
+                    (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END) +
+                    (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                    (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END)
+                ), 0) AS total,
+
+                -- Columna 3: Puntos por Ganador
+                COALESCE(SUM(CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END), 0) AS pts_ganador,
+
+                -- Columna 4: Puntos por Goles Independiente
+                COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END), 0) AS pts_cai,
+
+                -- Columna 5: Puntos por Goles Rival
+                COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival
+
+            FROM usuarios u
+            
+            -- Unimos con los pronósticos (última versión de cada uno)
+            LEFT JOIN (
+                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
+                FROM pronosticos p1
+                INNER JOIN (
+                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    GROUP BY usuario_id, partido_id
+                ) p2 ON p1.usuario_id = p2.usuario_id 
+                    AND p1.partido_id = p2.partido_id 
+                    AND p1.fecha_prediccion = p2.max_fecha
+            ) pr ON u.id = pr.usuario_id
+            
+            -- Unimos con la SUBCONSULTA de partidos ya filtrada (p)
+            -- Si el filtro descarta un partido, aquí será NULL y no sumará puntos,
+            -- pero el usuario seguirá apareciendo en la lista.
+            LEFT JOIN ({sql_partidos_filtrados}) p ON pr.partido_id = p.id
+            
+            GROUP BY u.id, u.username
+            ORDER BY total DESC;
+            """
+            
+            cursor.execute(sql, tuple(params))
+            return cursor.fetchall()
+
+        except Exception as e:
+            logger.error(f"Error calculando ranking en BD: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()    
 
     def editar_torneo(self, id_edicion, nuevo_nombre, nuevo_anio, nuevo_finalizado):
         """
