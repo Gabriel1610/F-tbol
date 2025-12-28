@@ -10,6 +10,7 @@ from ventana_mensaje import GestorMensajes
 
 # Constantes
 NOMBRE_ICONO = "Escudo.ico"
+MAXIMA_CANTIDAD_DE_PUNTOS = 9
 
 class SistemaIndependiente:
     def __init__(self, page: ft.Page):
@@ -279,11 +280,9 @@ class SistemaIndependiente:
         self.filtro_pron_torneo = None 
         self.filtro_pron_equipo = None 
         self.filtro_pron_usuario = None 
-        # Filtros Ranking (Excluyentes)
         self.filtro_ranking_edicion_id = None
         self.filtro_ranking_nombre = None
         self.filtro_ranking_anio = None
-        
         self.cache_ediciones_modal = [] 
         self.cache_rivales_modal = [] 
         self.temp_campeonato_sel = None 
@@ -297,6 +296,11 @@ class SistemaIndependiente:
         self.fila_partido_ref = None
         self.partido_a_pronosticar_id = None
         self.fila_pronostico_ref = None
+        
+        # Variables para gráficos
+        self.chk_usuarios_grafico = [] 
+        self.chk_usuarios_grafico_lp = [] # NUEVO: Para el gráfico de líneas por puntos
+        self.usuario_grafico_barra_sel = None 
 
         # --- SELECTORES ---
         self.date_picker = ft.DatePicker(on_change=self._fecha_cambiada, confirm_text="Seleccionar", cancel_text="Cancelar")
@@ -319,24 +323,61 @@ class SistemaIndependiente:
         self.loading_torneos_admin = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
         self.loading_copas = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
 
-        # --- BOTONES RANKING Y CONTENEDOR "LABELFRAME" FILTROS ---
-        # Botones con ancho fijo para uniformidad
+        # --- CONTENEDOR 1: FILTROS ---
         self.btn_ranking_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_torneo_ranking)
         self.btn_ranking_anio = ft.ElevatedButton("Por año", icon=ft.Icons.CALENDAR_MONTH, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_anio_ranking)
 
-        # Contenedor Vertical (Column) para apilar los botones
         self.contenedor_filtro_torneo = ft.Container(
             padding=ft.padding.all(10),
             border=ft.border.all(1, "white24"),
             border_radius=8,
             bgcolor="#1E1E1E", 
             content=ft.Column(
-                spacing=10, # Espacio entre botones
+                spacing=10,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     ft.Text("Filtros", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
                     self.btn_ranking_torneo, 
-                    self.btn_ranking_anio    # Debajo del anterior
+                    self.btn_ranking_anio 
+                ]
+            )
+        )
+
+        # --- CONTENEDOR 2: GRÁFICOS DE LÍNEA ---
+        self.btn_grafico_puestos = ft.ElevatedButton("Por puestos", icon=ft.Icons.SHOW_CHART, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_puestos)
+        # NUEVO BOTÓN
+        self.btn_grafico_linea_puntos = ft.ElevatedButton("Por puntos", icon=ft.Icons.SHOW_CHART, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_linea_puntos)
+
+        self.contenedor_graficos = ft.Container(
+            padding=ft.padding.all(10),
+            border=ft.border.all(1, "white24"),
+            border_radius=8,
+            bgcolor="#1E1E1E", 
+            content=ft.Column(
+                spacing=10,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text("Gráficos de línea", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
+                    self.btn_grafico_puestos,
+                    self.btn_grafico_linea_puntos # Agregado
+                ]
+            )
+        )
+
+        # --- CONTENEDOR 3: GRÁFICOS DE BARRA ---
+        self.btn_grafico_barras_puntos = ft.ElevatedButton("Puntos por partidos", icon=ft.Icons.BAR_CHART, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_barras)
+
+        self.contenedor_graficos_barra = ft.Container(
+            padding=ft.padding.all(10),
+            border=ft.border.all(1, "white24"),
+            border_radius=8,
+            bgcolor="#1E1E1E", 
+            content=ft.Column(
+                spacing=10,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                controls=[
+                    ft.Text("Gráficos de barra", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
+                    self.btn_grafico_barras_puntos
                 ]
             )
         )
@@ -377,7 +418,9 @@ class SistemaIndependiente:
         self.btn_clean_torneo = ft.IconButton(icon=ft.Icons.CLEANING_SERVICES, icon_color="grey", tooltip="Limpiar Formulario", on_click=self._limpiar_formulario_torneo)
 
         # --- TÍTULOS DINÁMICOS ---
-        self.txt_titulo_ranking = ft.Text("Tabla de Posiciones", size=28, weight=ft.FontWeight.BOLD, color="white")
+        self.txt_titulo_ranking = ft.Text("Tabla de posiciones histórica", size=28, weight=ft.FontWeight.BOLD, color="white")
+        self.txt_titulo_copas = ft.Text("Torneos ganados en la historia", size=24, weight=ft.FontWeight.BOLD, color="white")
+        
         self.txt_titulo_partidos = ft.Text("Partidos por jugar", size=28, weight=ft.FontWeight.BOLD, color="white")
         self.txt_titulo_pronosticos = ft.Text("Todos los pronósticos", size=28, weight=ft.FontWeight.BOLD, color="white") 
 
@@ -491,12 +534,17 @@ class SistemaIndependiente:
                                             )
                                         ]
                                     ),
-                                    ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_filtro_torneo)
+                                    # Filtros
+                                    ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_filtro_torneo),
+                                    # Gráficos Línea
+                                    ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_graficos),
+                                    # Gráficos Barra
+                                    ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_graficos_barra)
                                 ]
                             ),
                             
                             ft.Container(height=10),
-                            ft.Text("Torneos ganados", size=24, weight=ft.FontWeight.BOLD, color="white"),
+                            self.txt_titulo_copas, 
                             self.loading_copas, 
                             ft.Container(
                                 height=260, content=ft.Column(
@@ -630,6 +678,399 @@ class SistemaIndependiente:
         
         # Recargamos datos aplicando el orden
         self._recargar_datos(actualizar_pronosticos=True)
+
+# --- FUNCIONES GRÁFICO DE BARRAS (PUNTOS) ---
+
+    def _abrir_selector_grafico_barras(self, e):
+        """Abre el modal para configurar el gráfico de barras de puntos."""
+        self.lv_torneos_barra = ft.ListView(expand=True, spacing=5, height=150)
+        self.lv_anios_barra = ft.ListView(expand=True, spacing=5, height=150)
+        self.lv_usuarios_barra = ft.ListView(expand=True, spacing=5, height=150)
+        
+        self.temp_camp_barra = None
+        self.temp_anio_barra = None
+        self.usuario_grafico_barra_sel = None 
+        
+        self.btn_generar_grafico_barras = ft.ElevatedButton("Generar Gráfico", icon=ft.Icons.BAR_CHART, disabled=True, on_click=self._generar_grafico_barras)
+
+        def _cargar_datos():
+            bd = BaseDeDatos()
+            # 1. Torneos
+            ediciones = bd.obtener_ediciones()
+            self.cache_ediciones_modal = ediciones
+            nombres_unicos = sorted(list(set(e[1] for e in ediciones)))
+            
+            controles_tor = []
+            for nombre in nombres_unicos:
+                controles_tor.append(ft.ListTile(title=ft.Text(nombre, size=14), data=nombre, on_click=self._sel_torneo_barra_modal, bgcolor="#2D2D2D"))
+            self.lv_torneos_barra.controls = controles_tor
+            
+            # 2. Usuarios (Lista para seleccionar uno solo)
+            usuarios = bd.obtener_usuarios()
+            controles_usu = []
+            for usu in usuarios:
+                controles_usu.append(
+                    ft.ListTile(
+                        title=ft.Text(usu, size=14),
+                        data=usu,
+                        on_click=self._sel_usuario_barra_modal,
+                        bgcolor="#2D2D2D"
+                    )
+                )
+            self.lv_usuarios_barra.controls = controles_usu
+            
+            self.lv_torneos_barra.update()
+            self.lv_usuarios_barra.update()
+
+        col_tor = ft.Column(expand=1, controls=[ft.Text("1. Torneo", weight="bold"), ft.Container(content=self.lv_torneos_barra, border=ft.border.all(1, "white24"), border_radius=5)])
+        col_anio = ft.Column(expand=1, controls=[ft.Text("2. Año", weight="bold"), ft.Container(content=self.lv_anios_barra, border=ft.border.all(1, "white24"), border_radius=5)])
+        col_usu = ft.Column(expand=1, controls=[ft.Text("3. Un Usuario", weight="bold"), ft.Container(content=self.lv_usuarios_barra, border=ft.border.all(1, "white24"), border_radius=5)])
+
+        contenido = ft.Container(width=700, height=300, content=ft.Row(controls=[col_tor, col_anio, col_usu], spacing=20))
+
+        self.dlg_grafico_barras = ft.AlertDialog(modal=True, title=ft.Text("Configurar Gráfico de Puntos"), content=contenido, actions=[ft.TextButton("Cancelar", on_click=lambda e: self.page.close(self.dlg_grafico_barras)), self.btn_generar_grafico_barras])
+        self.page.open(self.dlg_grafico_barras)
+        threading.Thread(target=_cargar_datos, daemon=True).start()
+
+    # --- FUNCIONES GRÁFICO DE LÍNEA POR PUNTOS ---
+
+    def _abrir_selector_grafico_linea_puntos(self, e):
+        """Abre el modal para configurar el gráfico de línea de puntos."""
+        self.lv_torneos_graf_lp = ft.ListView(expand=True, spacing=5, height=150)
+        self.lv_anios_graf_lp = ft.ListView(expand=True, spacing=5, height=150)
+        self.lv_usuarios_graf_lp = ft.ListView(expand=True, spacing=5, height=150)
+        
+        self.temp_camp_graf_lp = None
+        self.temp_anio_graf_lp = None
+        self.chk_usuarios_grafico_lp = [] 
+        
+        self.btn_generar_grafico_lp = ft.ElevatedButton("Generar Gráfico", icon=ft.Icons.SHOW_CHART, disabled=True, on_click=self._generar_grafico_linea_puntos)
+
+        def _cargar_datos_lp():
+            bd = BaseDeDatos()
+            # 1. Torneos
+            ediciones = bd.obtener_ediciones()
+            self.cache_ediciones_modal = ediciones
+            nombres_unicos = sorted(list(set(e[1] for e in ediciones)))
+            
+            controles_tor = []
+            for nombre in nombres_unicos:
+                controles_tor.append(ft.ListTile(title=ft.Text(nombre, size=14), data=nombre, on_click=self._sel_torneo_graf_lp_modal, bgcolor="#2D2D2D"))
+            self.lv_torneos_graf_lp.controls = controles_tor
+            
+            # 2. Usuarios
+            usuarios = bd.obtener_usuarios()
+            controles_usu = []
+            for usu in usuarios:
+                chk = ft.Checkbox(label=usu, value=False, on_change=self._validar_seleccion_usuarios_grafico_lp)
+                self.chk_usuarios_grafico_lp.append(chk)
+                controles_usu.append(chk)
+            self.lv_usuarios_graf_lp.controls = controles_usu
+            
+            self.lv_torneos_graf_lp.update()
+            self.lv_usuarios_graf_lp.update()
+
+        col_tor = ft.Column(expand=1, controls=[ft.Text("1. Torneo", weight="bold"), ft.Container(content=self.lv_torneos_graf_lp, border=ft.border.all(1, "white24"), border_radius=5)])
+        col_anio = ft.Column(expand=1, controls=[ft.Text("2. Año", weight="bold"), ft.Container(content=self.lv_anios_graf_lp, border=ft.border.all(1, "white24"), border_radius=5)])
+        col_usu = ft.Column(expand=1, controls=[ft.Text("3. Usuarios (Max 3)", weight="bold"), ft.Container(content=self.lv_usuarios_graf_lp, border=ft.border.all(1, "white24"), border_radius=5)])
+
+        contenido = ft.Container(width=700, height=300, content=ft.Row(controls=[col_tor, col_anio, col_usu], spacing=20))
+
+        self.dlg_grafico_lp = ft.AlertDialog(modal=True, title=ft.Text("Configurar Gráfico de Puntos (Línea)"), content=contenido, actions=[ft.TextButton("Cancelar", on_click=lambda e: self.page.close(self.dlg_grafico_lp)), self.btn_generar_grafico_lp])
+        self.page.open(self.dlg_grafico_lp)
+        threading.Thread(target=_cargar_datos_lp, daemon=True).start()
+
+    def _sel_torneo_graf_lp_modal(self, e):
+        nombre = e.control.data
+        self.temp_camp_graf_lp = nombre
+        
+        for c in self.lv_torneos_graf_lp.controls: c.bgcolor = "blue" if c.data == nombre else "#2D2D2D"
+        self.lv_torneos_graf_lp.update()
+        
+        anios = sorted([ed[2] for ed in self.cache_ediciones_modal if ed[1] == nombre], reverse=True)
+        ctls = []
+        for a in anios:
+            ctls.append(ft.ListTile(title=ft.Text(str(a), size=14), data=a, on_click=self._sel_anio_graf_lp_modal, bgcolor="#2D2D2D"))
+        self.lv_anios_graf_lp.controls = ctls
+        self.lv_anios_graf_lp.update()
+        
+        self.temp_anio_graf_lp = None
+        self._validar_btn_grafico_lp()
+
+    def _sel_anio_graf_lp_modal(self, e):
+        self.temp_anio_graf_lp = e.control.data
+        for c in self.lv_anios_graf_lp.controls: c.bgcolor = "blue" if c.data == self.temp_anio_graf_lp else "#2D2D2D"
+        self.lv_anios_graf_lp.update()
+        self._validar_btn_grafico_lp()
+
+    def _validar_seleccion_usuarios_grafico_lp(self, e):
+        seleccionados = [c for c in self.chk_usuarios_grafico_lp if c.value]
+        if len(seleccionados) > 3:
+            e.control.value = False
+            e.control.update()
+            GestorMensajes.mostrar(self.page, "Límite", "Máximo 3 usuarios.", "info")
+        self._validar_btn_grafico_lp()
+
+    def _validar_btn_grafico_lp(self):
+        sel_users = [c for c in self.chk_usuarios_grafico_lp if c.value]
+        habilitar = self.temp_camp_graf_lp and self.temp_anio_graf_lp and len(sel_users) > 0
+        self.btn_generar_grafico_lp.disabled = not habilitar
+        self.btn_generar_grafico_lp.update()
+
+    def _generar_grafico_linea_puntos(self, e):
+        """Genera y muestra el gráfico de líneas de puntos acumulados."""
+        usuarios_sel = [c.label for c in self.chk_usuarios_grafico_lp if c.value]
+        
+        edicion_id = None
+        for ed in self.cache_ediciones_modal:
+            if ed[1] == self.temp_camp_graf_lp and ed[2] == self.temp_anio_graf_lp:
+                edicion_id = ed[0]
+                break
+        
+        if not edicion_id: return
+
+        def _tarea():
+            bd = BaseDeDatos()
+            cant_partidos, historial = bd.obtener_datos_evolucion_puntos(edicion_id, usuarios_sel)
+            
+            if cant_partidos == 0:
+                GestorMensajes.mostrar(self.page, "Info", "No hay partidos jugados.", "info")
+                return
+
+            # Calcular máximo puntaje alcanzado para escalar eje Y
+            max_puntos_alcanzado = 0
+            for puntos in historial.values():
+                if puntos:
+                    max_puntos_alcanzado = max(max_puntos_alcanzado, max(puntos))
+            
+            altura_eje = max_puntos_alcanzado + 2 # Margen superior
+
+            colores = [ft.Colors.CYAN, ft.Colors.AMBER, ft.Colors.PINK, ft.Colors.GREEN]
+            data_series = []
+            
+            for i, user in enumerate(usuarios_sel):
+                puntos_acum = historial.get(user, [])
+                
+                # Inicio en 0
+                puntos_grafico = [ft.LineChartDataPoint(0, 0, tooltip="Inicio")]
+                
+                for idx_partido, pts in enumerate(puntos_acum):
+                    puntos_grafico.append(
+                        ft.LineChartDataPoint(
+                            x=idx_partido + 1, 
+                            y=pts,
+                            tooltip=f"{pts} pts"
+                        )
+                    )
+                
+                data_series.append(
+                    ft.LineChartData(
+                        data_points=puntos_grafico,
+                        stroke_width=4,
+                        color=colores[i % len(colores)],
+                        curved=False,
+                        stroke_cap_round=True,
+                        point=True 
+                    )
+                )
+
+            # Eje Y Normal (0 abajo, Max arriba)
+            labels_y = [ft.ChartAxisLabel(value=0, label=ft.Text("0", size=10, weight="bold"))]
+            
+            # Etiquetas cada 5 puntos o 3 si son pocos
+            intervalo_y = 5 if altura_eje > 20 else 3
+            for p in range(intervalo_y, int(altura_eje), intervalo_y):
+                labels_y.append(
+                    ft.ChartAxisLabel(
+                        value=p, 
+                        label=ft.Text(str(p), size=12)
+                    )
+                )
+
+            # Intervalo X dinámico
+            intervalo_x = 1
+            if cant_partidos > 15: intervalo_x = 2
+            if cant_partidos > 30: intervalo_x = 5
+
+            chart = ft.LineChart(
+                data_series=data_series,
+                border=ft.border.all(1, ft.Colors.WHITE10),
+                left_axis=ft.ChartAxis(
+                    labels=labels_y,
+                    labels_size=40,
+                    title=ft.Text("Puntos Acumulados", size=14, italic=True),
+                    title_size=30
+                ),
+                bottom_axis=ft.ChartAxis(
+                    labels_interval=intervalo_x,
+                    title=ft.Text("Partido N°", size=14, italic=True),
+                    labels_size=40,
+                ),
+                tooltip_bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
+                min_y=0,
+                max_y=altura_eje,
+                min_x=0,
+                max_x=cant_partidos, 
+                horizontal_grid_lines=ft.ChartGridLines(interval=intervalo_y, color=ft.Colors.WHITE10, width=1),
+                expand=True,
+            )
+            
+            items_leyenda = []
+            for i, user in enumerate(usuarios_sel):
+                items_leyenda.append(
+                    ft.Row([
+                        ft.Container(width=15, height=15, bgcolor=colores[i % 3], border_radius=3),
+                        ft.Text(user, weight="bold", size=16)
+                    ], spacing=5)
+                )
+
+            ancho = self.page.width - 50
+            alto = self.page.height - 50
+
+            contenido_final = ft.Container(
+                width=ancho, height=alto,
+                padding=20, bgcolor="#1E1E1E",
+                content=ft.Column([
+                    ft.Row(
+                        controls=[
+                            ft.Text(f"Evolución Puntos: {self.temp_camp_graf_lp} {self.temp_anio_graf_lp}", size=24, weight="bold"),
+                            ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_lp_full))
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                    ),
+                    ft.Container(content=chart, expand=True, padding=ft.padding.all(20)),
+                    ft.Row(items_leyenda, alignment="center")
+                ])
+            )
+            
+            self.page.close(self.dlg_grafico_lp)
+            self.dlg_grafico_lp_full = ft.AlertDialog(content=contenido_final, modal=True, inset_padding=10)
+            self.page.open(self.dlg_grafico_lp_full)
+
+        threading.Thread(target=_tarea, daemon=True).start()
+        
+    def _sel_torneo_barra_modal(self, e):
+        nombre = e.control.data
+        self.temp_camp_barra = nombre
+        
+        for c in self.lv_torneos_barra.controls: c.bgcolor = "blue" if c.data == nombre else "#2D2D2D"
+        self.lv_torneos_barra.update()
+        
+        anios = sorted([ed[2] for ed in self.cache_ediciones_modal if ed[1] == nombre], reverse=True)
+        ctls = []
+        for a in anios:
+            ctls.append(ft.ListTile(title=ft.Text(str(a), size=14), data=a, on_click=self._sel_anio_barra_modal, bgcolor="#2D2D2D"))
+        self.lv_anios_barra.controls = ctls
+        self.lv_anios_barra.update()
+        
+        self.temp_anio_barra = None
+        self._validar_btn_grafico_barras()
+
+    def _sel_anio_barra_modal(self, e):
+        self.temp_anio_barra = e.control.data
+        for c in self.lv_anios_barra.controls: c.bgcolor = "blue" if c.data == self.temp_anio_barra else "#2D2D2D"
+        self.lv_anios_barra.update()
+        self._validar_btn_grafico_barras()
+
+    def _sel_usuario_barra_modal(self, e):
+        self.usuario_grafico_barra_sel = e.control.data
+        for c in self.lv_usuarios_barra.controls: c.bgcolor = "blue" if c.data == self.usuario_grafico_barra_sel else "#2D2D2D"
+        self.lv_usuarios_barra.update()
+        self._validar_btn_grafico_barras()
+
+    def _validar_btn_grafico_barras(self):
+        habilitar = self.temp_camp_barra and self.temp_anio_barra and self.usuario_grafico_barra_sel
+        self.btn_generar_grafico_barras.disabled = not habilitar
+        self.btn_generar_grafico_barras.update()
+
+    def _generar_grafico_barras(self, e):
+        edicion_id = None
+        for ed in self.cache_ediciones_modal:
+            if ed[1] == self.temp_camp_barra and ed[2] == self.temp_anio_barra:
+                edicion_id = ed[0]
+                break
+        
+        if not edicion_id: return
+
+        def _tarea():
+            bd = BaseDeDatos()
+            puntos_lista = bd.obtener_historial_puntos_usuario(edicion_id, self.usuario_grafico_barra_sel)
+            
+            if not puntos_lista:
+                GestorMensajes.mostrar(self.page, "Info", "No hay partidos jugados o pronósticos para este usuario.", "info")
+                return
+
+            # Crear datos para el gráfico de barras
+            bar_groups = []
+            for i, puntos in enumerate(puntos_lista):
+                n_partido = i + 1
+                color_barra = ft.Colors.BLUE
+                if puntos == 0: color_barra = ft.Colors.GREY
+                elif puntos == MAXIMA_CANTIDAD_DE_PUNTOS: color_barra = ft.Colors.GREEN # Color especial para puntaje perfecto
+                
+                bar_groups.append(
+                    ft.BarChartGroup(
+                        x=n_partido,
+                        bar_rods=[
+                            ft.BarChartRod(
+                                from_y=0,
+                                to_y=puntos,
+                                width=20,
+                                color=color_barra,
+                                tooltip=f"{puntos} pts",
+                                border_radius=3
+                            )
+                        ]
+                    )
+                )
+
+            # Ejes
+            chart = ft.BarChart(
+                bar_groups=bar_groups,
+                border=ft.border.all(1, ft.Colors.WHITE10),
+                left_axis=ft.ChartAxis(
+                    labels_size=40,
+                    title=ft.Text("Puntos", size=14, italic=True),
+                    title_size=40
+                ),
+                bottom_axis=ft.ChartAxis(
+                    labels=[
+                        ft.ChartAxisLabel(value=i+1, label=ft.Text(str(i+1), size=12)) for i in range(len(puntos_lista))
+                    ],
+                    labels_size=40,
+                    title=ft.Text("Partido N°", size=14, italic=True),
+                    title_size=40
+                ),
+                horizontal_grid_lines=ft.ChartGridLines(interval=1, color=ft.Colors.WHITE10, width=1),
+                min_y=0,
+                max_y=MAXIMA_CANTIDAD_DE_PUNTOS + 1, # Un poco de margen
+                expand=True
+            )
+
+            # Pantalla Completa
+            ancho = self.page.width - 50
+            alto = self.page.height - 50
+
+            contenido_final = ft.Container(
+                width=ancho, height=alto,
+                padding=20, bgcolor="#1E1E1E",
+                content=ft.Column([
+                    ft.Row(
+                        controls=[
+                            ft.Text(f"Puntos de {self.usuario_grafico_barra_sel}: {self.temp_camp_barra} {self.temp_anio_barra}", size=24, weight="bold"),
+                            ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_barras_full))
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                    ),
+                    ft.Container(content=chart, expand=True, padding=ft.padding.all(20))
+                ])
+            )
+            
+            self.page.close(self.dlg_grafico_barras)
+            self.dlg_grafico_barras_full = ft.AlertDialog(content=contenido_final, modal=True, inset_padding=10)
+            self.page.open(self.dlg_grafico_barras_full)
+
+        threading.Thread(target=_tarea, daemon=True).start()
 
     def _seleccionar_partido_para_pronostico(self, e):
         """Selecciona un partido en la tabla del usuario para pronosticar."""
@@ -812,35 +1253,6 @@ class SistemaIndependiente:
         self.page.open(self.dlg_modal)
         threading.Thread(target=_cargar_datos_modal, daemon=True).start()
 
-    def _confirmar_filtro_torneo_ranking(self, e):
-        """Busca el ID de la edición seleccionada y aplica el filtro al ranking"""
-        if self.temp_campeonato_sel and self.temp_anio_sel:
-            edicion_encontrada = None
-            for ed in self.cache_ediciones_modal:
-                if ed[1] == self.temp_campeonato_sel and ed[2] == self.temp_anio_sel:
-                    edicion_encontrada = ed[0] 
-                    break
-            
-            if edicion_encontrada:
-                # Establecer filtro torneo y borrar año (EXCLUSIVOS)
-                self.filtro_ranking_edicion_id = edicion_encontrada
-                self.filtro_ranking_anio = None # Limpiar año
-                
-                self.filtro_ranking_nombre = f"{self.temp_campeonato_sel} {self.temp_anio_sel}"
-                
-                # Actualizar Título
-                self.txt_titulo_ranking.value = f"Tabla de posiciones {self.filtro_ranking_nombre}"
-                self.txt_titulo_ranking.update()
-                
-                # Colores botones
-                self.btn_ranking_torneo.bgcolor = "blue"
-                self.btn_ranking_anio.bgcolor = "#333333" # Apagar el otro
-                self.btn_ranking_torneo.update()
-                self.btn_ranking_anio.update()
-                
-                self.page.close(self.dlg_modal)
-                self._recargar_datos(actualizar_ranking=True)
-
     def _confirmar_filtro_equipo_pronosticos(self, e):
         """Confirma selección equipo (COMBINABLE)"""
         if self.temp_rival_sel_nombre:
@@ -864,59 +1276,6 @@ class SistemaIndependiente:
             self._actualizar_titulo_pronosticos()
             self.page.close(self.dlg_modal_usuario)
             self._recargar_datos(actualizar_pronosticos=True)
-
-    def _abrir_selector_torneo_ranking(self, e):
-        # Reutilizamos el diseño del modal de torneos
-        self.lv_torneos = ft.ListView(expand=True, spacing=5, height=200)
-        self.lv_anios = ft.ListView(expand=True, spacing=5, height=200)
-        
-        self.btn_ver_torneo = ft.ElevatedButton("Ver", icon=ft.Icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_torneo_ranking)
-        
-        def _cargar_datos_modal():
-            try:
-                bd = BaseDeDatos()
-                ediciones = bd.obtener_ediciones()
-                self.cache_ediciones_modal = ediciones
-                nombres_unicos = sorted(list(set(e[1] for e in ediciones)))
-                
-                controles = []
-                for nombre in nombres_unicos:
-                    controles.append(ft.ListTile(title=ft.Text(nombre, size=14), data=nombre, on_click=self._seleccionar_campeonato_modal, bgcolor="#2D2D2D", shape=ft.RoundedRectangleBorder(radius=5)))
-                self.lv_torneos.controls = controles
-                self.lv_torneos.update()
-            except Exception as ex:
-                print(f"Error cargando modal: {ex}")
-
-        contenido_modal = ft.Container(width=500, height=300, content=ft.Row(controls=[ft.Column(expand=1, controls=[ft.Text("Torneo", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_torneos, border=ft.border.all(1, "white24"), border_radius=5, padding=5)]), ft.VerticalDivider(width=20, color="white24"), ft.Column(expand=1, controls=[ft.Text("Año", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_anios, border=ft.border.all(1, "white24"), border_radius=5, padding=5)])]))
-
-        self.dlg_modal = ft.AlertDialog(modal=True, title=ft.Text("Filtrar Ranking por Torneo"), content=contenido_modal, actions=[ft.TextButton("Cancelar", on_click=lambda e: self.page.close(self.dlg_modal)), self.btn_ver_torneo], actions_alignment=ft.MainAxisAlignment.END)
-        self.page.open(self.dlg_modal)
-        threading.Thread(target=_cargar_datos_modal, daemon=True).start()
-
-    def _confirmar_filtro_torneo_ranking(self, e):
-        """Busca el ID de la edición seleccionada y aplica el filtro al ranking"""
-        if self.temp_campeonato_sel and self.temp_anio_sel:
-            edicion_encontrada = None
-            for ed in self.cache_ediciones_modal:
-                if ed[1] == self.temp_campeonato_sel and ed[2] == self.temp_anio_sel:
-                    edicion_encontrada = ed[0] 
-                    break
-            
-            if edicion_encontrada:
-                # Establecer filtro
-                self.filtro_ranking_edicion_id = edicion_encontrada
-                # Formato solicitado: nombre torneo espacio año
-                self.filtro_ranking_nombre = f"{self.temp_campeonato_sel} {self.temp_anio_sel}"
-                
-                # Actualizar Título
-                self.txt_titulo_ranking.value = f"Tabla de posiciones {self.filtro_ranking_nombre}"
-                self.txt_titulo_ranking.update()
-                
-                self.btn_ranking_torneo.bgcolor = "blue"
-                self.btn_ranking_torneo.update()
-                
-                self.page.close(self.dlg_modal)
-                self._recargar_datos(actualizar_ranking=True)
 
     def _abrir_selector_equipo_pronosticos(self, e):
         self.lv_equipos = ft.ListView(expand=True, spacing=5, height=300)
@@ -952,7 +1311,7 @@ class SistemaIndependiente:
         self.btn_ver_anio.disabled = False
         self.btn_ver_anio.update()
 
-    def _recargar_datos(self, actualizar_partidos=False, actualizar_torneos=False, actualizar_admin=False, actualizar_pronosticos=False, actualizar_ranking=False):
+    def _recargar_datos(self, actualizar_partidos=False, actualizar_torneos=False, actualizar_admin=False, actualizar_pronosticos=False, actualizar_ranking=False, actualizar_copas=True):
         # Activamos las banderas correspondientes
         if actualizar_partidos:
             self.cargando_partidos = True
@@ -964,7 +1323,11 @@ class SistemaIndependiente:
 
         if actualizar_ranking:
             self.loading.visible = True
+            
+        # Lógica visual de Copas: solo si se pide actualizar Y no hay filtro de torneo activo
+        if actualizar_copas and self.filtro_ranking_edicion_id is None:
             self.loading_copas.visible = True 
+        
         if actualizar_partidos:
             self.loading_partidos.visible = True
             self._bloquear_botones_filtros(True) 
@@ -1003,11 +1366,9 @@ class SistemaIndependiente:
                     datos_ranking = bd.obtener_ranking(edicion_id=self.filtro_ranking_edicion_id, anio=self.filtro_ranking_anio)
                     filas_tabla_ranking = []
                     for i, fila in enumerate(datos_ranking, start=1):
-                        # AQUÍ GENERAMOS EXACTAMENTE 6 CELDAS PARA LA TABLA DE ESTADÍSTICAS
                         filas_tabla_ranking.append(ft.DataRow(cells=[
                             ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")), 
-                            # Ancho debe coincidir con la definición (130)
-                            ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=130, alignment=ft.alignment.center_left)), 
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=110, alignment=ft.alignment.center_left)), 
                             ft.DataCell(ft.Text(str(fila[1]), weight=ft.FontWeight.BOLD, color="yellow", size=16)), 
                             ft.DataCell(ft.Text(str(fila[2]), color="white70")), 
                             ft.DataCell(ft.Text(str(fila[3]), color="white70")), 
@@ -1015,19 +1376,22 @@ class SistemaIndependiente:
                         ]))
                     self.tabla_estadisticas.rows = filas_tabla_ranking
                     
-                    # Tabla Torneos Ganados
-                    datos_copas = bd.obtener_torneos_ganados()
-                    filas_copas = []
-                    for i, fila in enumerate(datos_copas, start=1):
-                        usuario_copa = fila[0]
-                        cantidad_copas = fila[1]
-                        filas_copas.append(ft.DataRow(cells=[
-                            ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")),
-                            # Ancho debe coincidir con la definición (130)
-                            ft.DataCell(ft.Container(content=ft.Text(str(usuario_copa), weight=ft.FontWeight.BOLD, color="white"), width=130, alignment=ft.alignment.center_left)),
-                            ft.DataCell(ft.Container(content=ft.Text(str(cantidad_copas), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=120, alignment=ft.alignment.center))
-                        ]))
-                    self.tabla_copas.rows = filas_copas
+                    # --- LÓGICA DE TABLA DE COPAS ---
+                    # Solo recargamos si se solicitó explícitamente Y no estamos filtrando por torneo
+                    if actualizar_copas and self.filtro_ranking_edicion_id is None:
+                        anio_para_copas = self.filtro_ranking_anio
+                        datos_copas = bd.obtener_torneos_ganados(anio=anio_para_copas)
+                        
+                        filas_copas = []
+                        for i, fila in enumerate(datos_copas, start=1):
+                            usuario_copa = fila[0]
+                            cantidad_copas = fila[1]
+                            filas_copas.append(ft.DataRow(cells=[
+                                ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")),
+                                ft.DataCell(ft.Container(content=ft.Text(str(usuario_copa), weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left)),
+                                ft.DataCell(ft.Container(content=ft.Text(str(cantidad_copas), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=120, alignment=ft.alignment.center))
+                            ]))
+                        self.tabla_copas.rows = filas_copas
 
                 # --- 1. TABLAS DE USUARIO (SOLO PARTIDOS) ---
                 if actualizar_partidos:
@@ -1078,23 +1442,18 @@ class SistemaIndependiente:
                     datos_pronosticos = bd.obtener_todos_pronosticos()
                     ahora = datetime.now()
                     
-                    # 1. FILTRO DE TIEMPO
                     if self.filtro_pron_tiempo == 'futuros':
                          datos_pronosticos = [d for d in datos_pronosticos if isinstance(d[1], datetime) and d[1] > ahora]
                     elif self.filtro_pron_tiempo == 'jugados':
                          datos_pronosticos = [d for d in datos_pronosticos if isinstance(d[1], datetime) and d[1] <= ahora]
                     
-                    # 2. FILTROS ESPECÍFICOS
                     if self.filtro_pron_torneo:
                          datos_pronosticos = [d for d in datos_pronosticos if str(d[2]) == self.filtro_pron_torneo]
-                    
                     if self.filtro_pron_equipo:
                          datos_pronosticos = [d for d in datos_pronosticos if str(d[0]) == self.filtro_pron_equipo]
-                         
                     if self.filtro_pron_usuario:
                          datos_pronosticos = [d for d in datos_pronosticos if str(d[5]) == self.filtro_pron_usuario]
                     
-                    # 3. ORDENAMIENTO
                     if self.pronosticos_sort_col_index is not None:
                         idx = self.pronosticos_sort_col_index
                         reverse_manual = not self.pronosticos_sort_asc 
@@ -1187,7 +1546,7 @@ class SistemaIndependiente:
                         filas_tabla_admin.append(ft.DataRow(cells=[ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=250, alignment=ft.alignment.center_left)), ft.DataCell(ft.Container(content=ft.Text(texto_resultado, color="white", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center)), ft.DataCell(ft.Text(fecha_display_str, color="white70")), ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=230, alignment=ft.alignment.center_left))], data={'id': p_id, 'rival': rival, 'fecha': fecha_obj, 'goles_cai': gc, 'goles_rival': gr, 'edicion_id': ed_id}, on_select_changed=self._seleccionar_partido, selected=False))
                     self.tabla_partidos_admin.rows = filas_tabla_admin
 
-                # --- 3. TORNEOS (MODIFICADO: Agregada columna Finalizado) ---
+                # --- 3. TORNEOS ---
                 if actualizar_torneos:
                     datos_ediciones = bd.obtener_ediciones()
                     filas_torneos = []
@@ -1195,7 +1554,7 @@ class SistemaIndependiente:
                         ed_id = ed[0]
                         nombre = ed[1]
                         anio = ed[2]
-                        finalizado = ed[3] # Nuevo campo
+                        finalizado = ed[3] 
                         
                         txt_finalizado = "Sí" if finalizado else "No"
                         color_finalizado = "green" if finalizado else "white"
@@ -1204,7 +1563,7 @@ class SistemaIndependiente:
                             ft.DataCell(ft.Container(content=ft.Text(str(nombre), color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), 
                             ft.DataCell(ft.Container(content=ft.Text(str(anio), color="yellow", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center_left)),
                             ft.DataCell(ft.Container(content=ft.Text(txt_finalizado, color=color_finalizado, weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center))
-                        ], data={ # Guardamos diccionario en data para recuperar el estado
+                        ], data={ 
                             'id': ed_id,
                             'finalizado': finalizado
                         }, on_select_changed=self._seleccionar_torneo, selected=False))
@@ -1298,7 +1657,7 @@ class SistemaIndependiente:
                 
                 self.page.close(self.dlg_modal)
                 self._recargar_datos(actualizar_partidos=True)
-                
+
     def _abrir_selector_equipo(self, e):
         """Abre un diálogo modal para seleccionar un equipo rival."""
         
@@ -1405,6 +1764,239 @@ class SistemaIndependiente:
             self.page.close(self.dlg_modal_equipo)
             self._recargar_datos(actualizar_partidos=True)
 
+    # --- FUNCIONES GRÁFICO DE PUESTOS ---
+
+    def _abrir_selector_grafico_puestos(self, e):
+        """Abre el modal para configurar el gráfico de evolución de puestos."""
+        self.lv_torneos_graf = ft.ListView(expand=True, spacing=5, height=150)
+        self.lv_anios_graf = ft.ListView(expand=True, spacing=5, height=150)
+        self.lv_usuarios_graf = ft.ListView(expand=True, spacing=5, height=150)
+        
+        self.temp_camp_graf = None
+        self.temp_anio_graf = None
+        self.chk_usuarios_grafico = [] 
+        
+        self.btn_generar_grafico = ft.ElevatedButton("Generar Gráfico", icon=ft.Icons.SHOW_CHART, disabled=True, on_click=self._generar_grafico_puestos)
+
+        def _cargar_datos():
+            bd = BaseDeDatos()
+            # 1. Torneos y Años
+            ediciones = bd.obtener_ediciones()
+            self.cache_ediciones_modal = ediciones
+            nombres_unicos = sorted(list(set(e[1] for e in ediciones)))
+            
+            controles_tor = []
+            for nombre in nombres_unicos:
+                # CORRECCIÓN: Se eliminó density="compact"
+                controles_tor.append(ft.ListTile(title=ft.Text(nombre, size=14), data=nombre, on_click=self._sel_torneo_graf_modal, bgcolor="#2D2D2D"))
+            self.lv_torneos_graf.controls = controles_tor
+            
+            # 2. Usuarios
+            usuarios = bd.obtener_usuarios()
+            controles_usu = []
+            for usu in usuarios:
+                chk = ft.Checkbox(label=usu, value=False, on_change=self._validar_seleccion_usuarios_grafico)
+                self.chk_usuarios_grafico.append(chk)
+                controles_usu.append(chk)
+            self.lv_usuarios_graf.controls = controles_usu
+            
+            self.lv_torneos_graf.update()
+            self.lv_usuarios_graf.update()
+
+        col_tor = ft.Column(expand=1, controls=[ft.Text("1. Torneo", weight="bold"), ft.Container(content=self.lv_torneos_graf, border=ft.border.all(1, "white24"), border_radius=5)])
+        col_anio = ft.Column(expand=1, controls=[ft.Text("2. Año", weight="bold"), ft.Container(content=self.lv_anios_graf, border=ft.border.all(1, "white24"), border_radius=5)])
+        col_usu = ft.Column(expand=1, controls=[ft.Text("3. Usuarios (Max 3)", weight="bold"), ft.Container(content=self.lv_usuarios_graf, border=ft.border.all(1, "white24"), border_radius=5)])
+
+        contenido = ft.Container(width=700, height=300, content=ft.Row(controls=[col_tor, col_anio, col_usu], spacing=20))
+
+        self.dlg_grafico = ft.AlertDialog(modal=True, title=ft.Text("Configurar Gráfico de Evolución"), content=contenido, actions=[ft.TextButton("Cancelar", on_click=lambda e: self.page.close(self.dlg_grafico)), self.btn_generar_grafico])
+        self.page.open(self.dlg_grafico)
+        threading.Thread(target=_cargar_datos, daemon=True).start()
+
+    def _sel_torneo_graf_modal(self, e):
+        """Selecciona torneo en el modal de gráfico y carga años."""
+        nombre = e.control.data
+        self.temp_camp_graf = nombre
+        
+        # Resaltar
+        for c in self.lv_torneos_graf.controls: c.bgcolor = "blue" if c.data == nombre else "#2D2D2D"
+        self.lv_torneos_graf.update()
+        
+        # Filtrar años
+        anios = sorted([ed[2] for ed in self.cache_ediciones_modal if ed[1] == nombre], reverse=True)
+        ctls = []
+        for a in anios:
+            # CORRECCIÓN: Se eliminó density="compact"
+            ctls.append(ft.ListTile(title=ft.Text(str(a), size=14), data=a, on_click=self._sel_anio_graf_modal, bgcolor="#2D2D2D"))
+        self.lv_anios_graf.controls = ctls
+        self.lv_anios_graf.update()
+        
+        self.temp_anio_graf = None
+        self._validar_btn_grafico()
+
+    def _sel_anio_graf_modal(self, e):
+        self.temp_anio_graf = e.control.data
+        for c in self.lv_anios_graf.controls: c.bgcolor = "blue" if c.data == self.temp_anio_graf else "#2D2D2D"
+        self.lv_anios_graf.update()
+        self._validar_btn_grafico()
+
+    def _validar_seleccion_usuarios_grafico(self, e):
+        seleccionados = [c for c in self.chk_usuarios_grafico if c.value]
+        if len(seleccionados) > 3:
+            e.control.value = False
+            e.control.update()
+            GestorMensajes.mostrar(self.page, "Límite", "Máximo 3 usuarios.", "info")
+        self._validar_btn_grafico()
+
+    def _validar_btn_grafico(self):
+        sel_users = [c for c in self.chk_usuarios_grafico if c.value]
+        habilitar = self.temp_camp_graf and self.temp_anio_graf and len(sel_users) > 0
+        self.btn_generar_grafico.disabled = not habilitar
+        self.btn_generar_grafico.update()
+
+    def _generar_grafico_puestos(self, e):
+        """Genera y muestra el gráfico de líneas con ejes optimizados y visibles."""
+        usuarios_sel = [c.label for c in self.chk_usuarios_grafico if c.value]
+        
+        edicion_id = None
+        for ed in self.cache_ediciones_modal:
+            if ed[1] == self.temp_camp_graf and ed[2] == self.temp_anio_graf:
+                edicion_id = ed[0]
+                break
+        
+        if not edicion_id: return
+
+        def _tarea():
+            bd = BaseDeDatos()
+            cant_partidos, total_usuarios, historial = bd.obtener_datos_evolucion_puestos(edicion_id, usuarios_sel)
+            
+            if cant_partidos == 0:
+                GestorMensajes.mostrar(self.page, "Info", "No hay datos de partidos jugados.", "info")
+                return
+
+            # 1. Determinar el rango del eje Y
+            # Buscamos el peor puesto registrado en este historial para no hacer un gráfico gigante si son pocos
+            peor_puesto_registrado = 1
+            for puestos in historial.values():
+                if puestos:
+                    peor_puesto_registrado = max(peor_puesto_registrado, max(puestos))
+            
+            # Altura = Peor puesto + 1 (para que el puesto más bajo no quede pegado al suelo)
+            altura_eje = peor_puesto_registrado + 1
+            
+            colores = [ft.Colors.CYAN, ft.Colors.AMBER, ft.Colors.PINK, ft.Colors.GREEN]
+            data_series = []
+            
+            # 2. Construir líneas
+            for i, user in enumerate(usuarios_sel):
+                puestos = historial.get(user, [])
+                
+                # Punto de inicio (0, 0)
+                puntos_grafico = [ft.LineChartDataPoint(0, 0, tooltip="Inicio")]
+                
+                for idx_partido, puesto in enumerate(puestos):
+                    # Fórmula para invertir visualmente: Arriba el 1, Abajo el mayor.
+                    valor_y = altura_eje - puesto
+                    
+                    puntos_grafico.append(
+                        ft.LineChartDataPoint(
+                            x=idx_partido + 1, 
+                            y=valor_y,
+                            tooltip=f"{puesto}º" # Tooltip muestra el puesto real
+                        )
+                    )
+                
+                data_series.append(
+                    ft.LineChartData(
+                        data_points=puntos_grafico,
+                        stroke_width=4,
+                        color=colores[i % len(colores)],
+                        curved=False,
+                        stroke_cap_round=True,
+                        point=True 
+                    )
+                )
+
+            # 3. Etiquetas Eje Y (TODAS)
+            labels_y = [ft.ChartAxisLabel(value=0, label=ft.Text("Inicio", size=10, weight="bold"))]
+            
+            # Mostramos TODOS los puestos involucrados
+            for p in range(1, peor_puesto_registrado + 1):
+                val_y = altura_eje - p 
+                labels_y.append(
+                    ft.ChartAxisLabel(
+                        value=val_y, 
+                        label=ft.Text(f"{p}º", size=14 if p==1 else 12, weight="bold" if p==1 else "normal")
+                    )
+                )
+
+            # 4. Intervalo Eje X dinámico (para que no se amontonen si hay muchos)
+            intervalo_x = 1
+            if cant_partidos > 15: intervalo_x = 2
+            if cant_partidos > 30: intervalo_x = 5
+
+            # 5. Configuración del Gráfico
+            chart = ft.LineChart(
+                data_series=data_series,
+                border=ft.border.all(1, ft.Colors.WHITE10),
+                # EJE IZQUIERDO
+                left_axis=ft.ChartAxis(
+                    labels=labels_y,
+                    labels_size=50, # Espacio reservado para texto "1º", "10º"
+                ),
+                # EJE INFERIOR
+                bottom_axis=ft.ChartAxis(
+                    labels_interval=intervalo_x,
+                    title=ft.Text("Partido N°", size=14, italic=True),
+                    labels_size=40, # AUMENTADO: Espacio para que no se corten los números ni el título
+                ),
+                tooltip_bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
+                min_y=0,
+                max_y=altura_eje + 0.2, # Un poquito de aire arriba
+                min_x=0,
+                max_x=cant_partidos, 
+                horizontal_grid_lines=ft.ChartGridLines(interval=1, color=ft.Colors.WHITE10, width=1),
+                expand=True,
+            )
+            
+            # Leyenda
+            items_leyenda = []
+            for i, user in enumerate(usuarios_sel):
+                items_leyenda.append(
+                    ft.Row([
+                        ft.Container(width=15, height=15, bgcolor=colores[i % 3], border_radius=3),
+                        ft.Text(user, weight="bold", size=16)
+                    ], spacing=5)
+                )
+
+            # --- PANTALLA COMPLETA ---
+            ancho = self.page.width - 50
+            alto = self.page.height - 50
+
+            contenido_final = ft.Container(
+                width=ancho, height=alto,
+                padding=20, bgcolor="#1E1E1E",
+                content=ft.Column([
+                    ft.Row(
+                        controls=[
+                            ft.Text(f"Evolución: {self.temp_camp_graf} {self.temp_anio_graf}", size=24, weight="bold"),
+                            ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_full))
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                    ),
+                    # Agregamos padding al contenedor del gráfico para evitar cortes en bordes
+                    ft.Container(content=chart, expand=True, padding=ft.padding.all(20)),
+                    ft.Row(items_leyenda, alignment="center")
+                ])
+            )
+            
+            self.page.close(self.dlg_grafico)
+            
+            self.dlg_grafico_full = ft.AlertDialog(content=contenido_final, modal=True, inset_padding=10)
+            self.page.open(self.dlg_grafico_full)
+
+        threading.Thread(target=_tarea, daemon=True).start()
+
     def _cambiar_filtro(self, nuevo_filtro):
         """
         Cambia el filtro de partidos y actualiza los botones y el título.
@@ -1449,21 +2041,22 @@ class SistemaIndependiente:
 
     def _abrir_selector_torneo_ranking(self, e):
         # --- 1. LÓGICA DE TOGGLE ---
-        # Si ya hay un torneo filtrado, lo quitamos (volvemos a tabla global)
+        # Si ya hay un torneo filtrado, lo quitamos
         if self.filtro_ranking_edicion_id is not None:
             self.filtro_ranking_edicion_id = None
             self.filtro_ranking_nombre = None
             
-            # Restaurar título
-            self.txt_titulo_ranking.value = "Tabla de Posiciones"
+            # Restaurar títulos
+            self.txt_titulo_ranking.value = "Tabla de posiciones histórica"
+            # OJO: No tocamos título de copas ni tabla de copas
             self.txt_titulo_ranking.update()
             
             # Apagar botón visualmente
             self.btn_ranking_torneo.bgcolor = "#333333"
             self.btn_ranking_torneo.update()
             
-            # Recargar datos globales
-            self._recargar_datos(actualizar_ranking=True)
+            # Recargar datos globales SIN TOCAR COPAS
+            self._recargar_datos(actualizar_ranking=True, actualizar_copas=False)
             return
 
         # --- 2. SI NO ESTÁ ACTIVO, ABRIMOS EL MODAL ---
@@ -1499,9 +2092,11 @@ class SistemaIndependiente:
         if self.filtro_ranking_anio is not None:
             self.filtro_ranking_anio = None
             
-            # Restaurar título
-            self.txt_titulo_ranking.value = "Tabla de Posiciones"
+            # Restaurar títulos
+            self.txt_titulo_ranking.value = "Tabla de posiciones histórica"
+            self.txt_titulo_copas.value = "Torneos ganados en la historia"
             self.txt_titulo_ranking.update()
+            self.txt_titulo_copas.update()
             
             # Apagar botón visualmente
             self.btn_ranking_anio.bgcolor = "#333333"
@@ -1565,6 +2160,7 @@ class SistemaIndependiente:
 
         self.page.open(self.dlg_modal_anio)
         threading.Thread(target=_cargar_anios, daemon=True).start()
+
     def _seleccionar_campeonato_modal(self, e):
         """Al clickear un torneo, filtra y muestra sus años disponibles"""
         nombre_sel = e.control.data
@@ -1611,7 +2207,6 @@ class SistemaIndependiente:
         self.btn_ver_torneo.disabled = False
         self.btn_ver_torneo.update()
 
-    
     def _confirmar_filtro_torneo_ranking(self, e):
         """Busca el ID de la edición seleccionada y aplica el filtro al ranking"""
         if self.temp_campeonato_sel and self.temp_anio_sel:
@@ -1641,7 +2236,8 @@ class SistemaIndependiente:
                 self.btn_ranking_anio.update()
                 
                 self.page.close(self.dlg_modal)
-                self._recargar_datos(actualizar_ranking=True)
+                # IMPORTANTE: No actualizar Copas
+                self._recargar_datos(actualizar_ranking=True, actualizar_copas=False)
 
     def _confirmar_filtro_anio_ranking(self, e):
         """Confirma el filtro por año y borra el de torneo"""
@@ -1653,9 +2249,11 @@ class SistemaIndependiente:
             self.filtro_ranking_edicion_id = None 
             self.filtro_ranking_nombre = None
             
-            # 3. Actualizar Título
+            # 3. Actualizar Títulos
             self.txt_titulo_ranking.value = f"Tabla de posiciones {self.filtro_ranking_anio}"
+            self.txt_titulo_copas.value = f"Torneos ganados {self.filtro_ranking_anio}" # Nuevo título
             self.txt_titulo_ranking.update()
+            self.txt_titulo_copas.update()
             
             # 4. Actualizar Botones (Uno azul, el otro negro)
             self.btn_ranking_anio.bgcolor = "blue"

@@ -9,6 +9,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
 PUNTOS = 3
+MÁXIMA_CANTIDAD_DE_PUNTOS = 9
 
 # Configuración del Logger
 logging.basicConfig(level=logging.INFO)
@@ -57,93 +58,6 @@ class BaseDeDatos:
                 raise Exception(f"Error SSL: {msg}\nRuta buscada: {self.config.get('ssl_ca')}")
             else:
                 raise Exception(f"Error de Conexión: {msg}")
-
-    def obtener_ranking(self, edicion_id=None, anio=None):
-        """
-        Calcula el ranking filtrando los partidos elegibles mediante una subconsulta.
-        Esto evita errores de referencia en los JOINs y mantiene a todos los usuarios en la lista.
-        """
-        conexion = None
-        cursor = None
-        try:
-            conexion = self.abrir()
-            cursor = conexion.cursor() 
-
-            # Construcción dinámica de la subconsulta de partidos filtrados
-            subquery_partidos = "SELECT * FROM partidos" # Base
-            joins_filtro = ""
-            where_filtro = "WHERE goles_independiente IS NOT NULL" # Siempre solo jugados
-            params = []
-            
-            if edicion_id is not None:
-                where_filtro += " AND edicion_id = %s"
-                params.append(edicion_id)
-            elif anio is not None:
-                # Unimos con ediciones y anios DENTRO de la subconsulta para filtrar por año
-                joins_filtro = """
-                    JOIN ediciones e ON partidos.edicion_id = e.id 
-                    JOIN anios a ON e.anio_id = a.id 
-                """
-                where_filtro += " AND a.numero = %s"
-                params.append(anio)
-
-            # Query Principal
-            sql = f"""
-            SELECT 
-                u.username,
-                
-                -- Columna 2: Puntos Totales
-                COALESCE(SUM(
-                    (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END) +
-                    (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
-                    (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END)
-                ), 0) AS total,
-
-                -- Columna 3: Puntos por Ganador
-                COALESCE(SUM(CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END), 0) AS pts_ganador,
-
-                -- Columna 4: Puntos por Goles Independiente
-                COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END), 0) AS pts_cai,
-
-                -- Columna 5: Puntos por Goles Rival
-                COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival
-
-            FROM usuarios u
-            
-            -- 1. Unimos con los pronósticos del usuario
-            LEFT JOIN (
-                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
-                FROM pronosticos p1
-                INNER JOIN (
-                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
-                    FROM pronosticos
-                    GROUP BY usuario_id, partido_id
-                ) p2 ON p1.usuario_id = p2.usuario_id 
-                    AND p1.partido_id = p2.partido_id 
-                    AND p1.fecha_prediccion = p2.max_fecha
-            ) pr ON u.id = pr.usuario_id
-            
-            -- 2. Unimos con la SUBCONSULTA de partidos ya filtrados (por año o torneo)
-            LEFT JOIN (
-                SELECT partidos.id, partidos.goles_independiente, partidos.goles_rival 
-                FROM partidos
-                {joins_filtro}
-                {where_filtro}
-            ) p ON pr.partido_id = p.id
-            
-            GROUP BY u.id, u.username
-            ORDER BY total DESC;
-            """
-            
-            cursor.execute(sql, tuple(params))
-            return cursor.fetchall()
-
-        except Exception as e:
-            logger.error(f"Error calculando ranking en BD: {e}")
-            return []
-        finally:
-            if cursor: cursor.close()
-            if conexion: conexion.close()
 
     def insertar_usuario(self, username, password):
         """
@@ -459,17 +373,251 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    def obtener_torneos_ganados(self):
+    def obtener_datos_evolucion_puestos(self, edicion_id, usuarios_seleccionados):
         """
-        Calcula cuántos torneos ha ganado cada usuario.
-        Solo cuenta torneos marcados como FINALIZADOS (e.finalizado = TRUE).
-        Incluye a todos los usuarios, mostrando 0 si no ganaron ninguno.
+        Calcula la evolución del ranking partido a partido.
+        Maneja empates: Si varios usuarios tienen los mismos puntos, comparten el mejor puesto.
+        Ejemplo: Juan(50) -> 1º, José(45) -> 2º, Pedro(45) -> 2º.
+        Retorna: 
+            - cantidad_partidos (int)
+            - total_usuarios_sistema (int)
+            - historial (dict): {usuario: [puesto_fecha_1, puesto_fecha_2...]}
         """
         conexion = None
         cursor = None
         try:
             conexion = self.abrir()
             cursor = conexion.cursor()
+
+            # 1. Contar total de usuarios para escalar el gráfico
+            cursor.execute("SELECT COUNT(*) FROM usuarios")
+            total_usuarios = cursor.fetchone()[0]
+
+            # 2. Obtener partidos JUGADOS de la edición ordenados por fecha
+            sql_partidos = """
+                SELECT id 
+                FROM partidos 
+                WHERE edicion_id = %s AND goles_independiente IS NOT NULL 
+                ORDER BY fecha_hora ASC
+            """
+            cursor.execute(sql_partidos, (edicion_id,))
+            partidos = [row[0] for row in cursor.fetchall()]
+
+            if not partidos:
+                return 0, total_usuarios, {}
+
+            # 3. Obtener todos los usuarios
+            cursor.execute("SELECT id, username FROM usuarios")
+            usuarios_bd = cursor.fetchall()
+            
+            puntos_acumulados = {u[0]: 0 for u in usuarios_bd} 
+            mapa_nombres = {u[0]: u[1] for u in usuarios_bd}
+            historial_grafico = {user: [] for user in usuarios_seleccionados}
+
+            # 4. Iterar partido a partido
+            for partido_id in partidos:
+                # Obtener puntos de ESTA fecha
+                sql_puntos = f"""
+                    SELECT 
+                        pr.usuario_id,
+                        (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END) as puntos
+                    FROM pronosticos pr
+                    JOIN partidos p ON pr.partido_id = p.id
+                    WHERE p.id = %s
+                """
+                cursor.execute(sql_puntos, (partido_id,))
+                resultados = cursor.fetchall()
+
+                # Sumar al acumulado global
+                for uid, pts in resultados:
+                    if uid in puntos_acumulados:
+                        puntos_acumulados[uid] += pts
+
+                # --- CÁLCULO DE RANKING CON EMPATES ---
+                # Ordenar lista de (id, puntos) de mayor a menor
+                ranking_ordenado = sorted(puntos_acumulados.items(), key=lambda x: x[1], reverse=True)
+                
+                mapa_puestos = {}
+                puntos_anteriores = -1
+                puesto_actual = 0
+                
+                for i, (uid, pts) in enumerate(ranking_ordenado):
+                    # Si los puntos son distintos al anterior, el puesto es su posición real en la lista (índice + 1)
+                    if pts != puntos_anteriores:
+                        puesto_actual = i + 1
+                        puntos_anteriores = pts
+                    # Si los puntos son iguales, se mantiene el 'puesto_actual' (el mejor del grupo empatado)
+                    
+                    mapa_puestos[uid] = puesto_actual
+
+                # Guardar el puesto calculado para los usuarios seleccionados
+                for usuario_target in usuarios_seleccionados:
+                    # Buscar ID del nombre de usuario
+                    target_id = next((k for k, v in mapa_nombres.items() if v == usuario_target), None)
+                    if target_id:
+                        puesto = mapa_puestos.get(target_id)
+                        historial_grafico[usuario_target].append(puesto)
+
+            return len(partidos), total_usuarios, historial_grafico
+
+        except Exception as e:
+            logger.error(f"Error evolución: {e}")
+            return 0, 0, {}
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def obtener_datos_evolucion_puntos(self, edicion_id, usuarios_seleccionados):
+        """
+        Calcula la evolución de PUNTOS acumulados partido a partido.
+        Retorna: 
+            - cantidad_partidos (int)
+            - historial (dict): {usuario: [puntos_acum_fecha_1, puntos_acum_fecha_2...]}
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            # 1. Obtener partidos JUGADOS de la edición ordenados por fecha
+            sql_partidos = """
+                SELECT id 
+                FROM partidos 
+                WHERE edicion_id = %s AND goles_independiente IS NOT NULL 
+                ORDER BY fecha_hora ASC
+            """
+            cursor.execute(sql_partidos, (edicion_id,))
+            partidos = [row[0] for row in cursor.fetchall()]
+
+            if not partidos:
+                return 0, {}
+
+            if not usuarios_seleccionados:
+                return len(partidos), {}
+
+            # 2. Obtener IDs de usuarios seleccionados
+            # Creamos una cadena de placeholders '%s' según la cantidad de usuarios
+            placeholders = ','.join(['%s'] * len(usuarios_seleccionados))
+            sql_ids = f"SELECT id, username FROM usuarios WHERE username IN ({placeholders})"
+            cursor.execute(sql_ids, tuple(usuarios_seleccionados))
+            users_data = cursor.fetchall()
+            
+            # Mapa ID -> Nombre y Acumulador {ID: 0}
+            mapa_id_nombre = {u[0]: u[1] for u in users_data}
+            puntos_acumulados = {u[0]: 0 for u in users_data}
+            historial_grafico = {name: [] for name in usuarios_seleccionados}
+
+            # 3. Iterar partido a partido
+            for partido_id in partidos:
+                # Obtener puntos de ESTE partido solo para los usuarios seleccionados
+                if not mapa_id_nombre: break
+                
+                ids_in_clause = ','.join(map(str, mapa_id_nombre.keys()))
+                
+                sql_puntos = f"""
+                    SELECT 
+                        pr.usuario_id,
+                        (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END) as puntos
+                    FROM pronosticos pr
+                    JOIN partidos p ON pr.partido_id = p.id
+                    WHERE p.id = %s AND pr.usuario_id IN ({ids_in_clause})
+                """
+                cursor.execute(sql_puntos, (partido_id,))
+                resultados = cursor.fetchall() 
+                
+                # Crear diccionario temporal para este partido {uid: puntos}
+                puntos_fecha = {row[0]: row[1] for row in resultados}
+
+                # Actualizar acumulados y guardar en historial
+                for uid, nombre in mapa_id_nombre.items():
+                    pts_ganados = puntos_fecha.get(uid, 0) # Si no pronosticó, suma 0
+                    puntos_acumulados[uid] += pts_ganados
+                    historial_grafico[nombre].append(puntos_acumulados[uid])
+
+            return len(partidos), historial_grafico
+
+        except Exception as e:
+            logger.error(f"Error evolución puntos: {e}")
+            return 0, {}
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def obtener_historial_puntos_usuario(self, edicion_id, usuario):
+        """
+        Obtiene una lista ordenada de puntos obtenidos por un usuario.
+        Filtra solo el ÚLTIMO pronóstico realizado por partido para evitar duplicados en el gráfico.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            sql = f"""
+            SELECT 
+                CASE 
+                    WHEN p.goles_independiente IS NULL THEN 0
+                    WHEN pr.pred_goles_independiente IS NULL THEN 0
+                    ELSE
+                        (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
+                END as puntos
+            FROM partidos p
+            -- Subconsulta para obtener SOLO el último pronóstico del usuario para cada partido
+            LEFT JOIN (
+                SELECT p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
+                FROM pronosticos p1
+                INNER JOIN (
+                    SELECT partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    WHERE usuario_id = (SELECT id FROM usuarios WHERE username = %s)
+                    GROUP BY partido_id
+                ) p2 ON p1.partido_id = p2.partido_id AND p1.fecha_prediccion = p2.max_fecha
+                WHERE p1.usuario_id = (SELECT id FROM usuarios WHERE username = %s)
+            ) pr ON p.id = pr.partido_id
+            WHERE p.edicion_id = %s 
+              AND p.goles_independiente IS NOT NULL
+            ORDER BY p.fecha_hora ASC
+            """
+            
+            # Pasamos 'usuario' dos veces (para las subconsultas) y luego 'edicion_id'
+            cursor.execute(sql, (usuario, usuario, edicion_id))
+            resultados = cursor.fetchall()
+            
+            return [row[0] for row in resultados]
+
+        except Exception as e:
+            logger.error(f"Error obteniendo historial puntos: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()  
+
+    def obtener_torneos_ganados(self, anio=None):
+        """
+        Calcula cuántos torneos ha ganado cada usuario.
+        - Solo cuenta torneos marcados como FINALIZADOS (e.finalizado = TRUE).
+        - Si anio is not None, solo cuenta los torneos finalizados de ese año.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            params = []
+            filtro_anio = ""
+            
+            if anio is not None:
+                filtro_anio = " AND a.numero = %s "
+                params.append(anio)
 
             sql = f"""
             WITH PuntosPorUsuarioEdicion AS (
@@ -485,8 +633,10 @@ class BaseDeDatos:
                 JOIN pronosticos pr ON u.id = pr.usuario_id
                 JOIN partidos p ON pr.partido_id = p.id
                 JOIN ediciones e ON p.edicion_id = e.id
+                JOIN anios a ON e.anio_id = a.id  -- Join necesario para filtrar por año
                 WHERE p.goles_independiente IS NOT NULL 
-                  AND e.finalizado = TRUE  -- SOLO TORNEOS FINALIZADOS
+                  AND e.finalizado = TRUE
+                  {filtro_anio} -- Inyección del filtro
                 GROUP BY u.username, p.edicion_id
             ),
             MaximosPorEdicion AS (
@@ -509,7 +659,7 @@ class BaseDeDatos:
             ORDER BY copas DESC, u.username ASC
             """
             
-            cursor.execute(sql)
+            cursor.execute(sql, tuple(params))
             return cursor.fetchall()
         except Exception as e:
             logger.error(f"Error obteniendo historial de campeones: {e}")
