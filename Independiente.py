@@ -2,21 +2,130 @@ import flet as ft
 import os
 import time
 import threading
+import requests
 from tarjeta_acceso import TarjetaAcceso
 from estilos import Estilos
 from base_de_datos import BaseDeDatos
-from datetime import datetime, timedelta
+from datetime import datetime
 from ventana_mensaje import GestorMensajes
 
 # Constantes
 NOMBRE_ICONO = "Escudo.ico"
 MAXIMA_CANTIDAD_DE_PUNTOS = 9
+ID_INDEPENDIENTE = 10078  # ID real de Independiente en FotMob
+URL_API = "https://www.fotmob.com/api/teams"
+CANT_PARTIDOS_A_SINCRONIZAR = 5
 
 class SistemaIndependiente:
     def __init__(self, page: ft.Page):
         self.page = page
         self._configurar_ventana()
         self._construir_interfaz_login()
+
+    def _sincronizar_fixture_api(self):
+        """
+        Consulta la API de FotMob con estrategia de 'barrido completo'.
+        Busca en 'results', 'fixtures' y 'allFixtures' para asegurar 
+        al menos 5 partidos pasados y 5 futuros, unificando por ID.
+        """
+        print("Iniciando sincronización con FotMob (Modo Completo)...")
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        }
+        
+        params = {
+            "id": ID_INDEPENDIENTE,
+            "timezone": "America/Argentina/Buenos_Aires",
+            "ccode3": "ARG"
+        }
+        
+        bd = BaseDeDatos()
+        
+        try:
+            response = requests.get(URL_API, headers=headers, params=params, timeout=15)
+            if response.status_code != 200:
+                print(f"Error API: Status {response.status_code}")
+                return
+
+            data = response.json()
+            fixtures_obj = data.get("fixtures", {})
+            
+            partidos_unicos = {}
+
+            def agregar_partidos(lista_origen):
+                if not lista_origen: return
+                for m in lista_origen:
+                    if isinstance(m, dict):
+                        m_id = m.get("id")
+                        if m_id:
+                            partidos_unicos[m_id] = m
+
+            agregar_partidos(fixtures_obj.get("results", []))
+            agregar_partidos(fixtures_obj.get("fixtures", []))
+            
+            raw_all = fixtures_obj.get("allFixtures")
+            if isinstance(raw_all, list):
+                agregar_partidos(raw_all)
+            elif isinstance(raw_all, dict):
+                if "fixtures" in raw_all and isinstance(raw_all["fixtures"], list):
+                    agregar_partidos(raw_all["fixtures"])
+                else:
+                    for val in raw_all.values():
+                        if isinstance(val, list):
+                            agregar_partidos(val)
+
+            if not partidos_unicos:
+                print("La API respondió pero no se encontraron partidos válidos.")
+                return
+
+            jugados = []
+            por_jugar = []
+            
+            for match in partidos_unicos.values():
+                datos = self._procesar_partido_fotmob(match)
+                if not datos: continue
+                
+                status = match.get("status", {})
+                finished = status.get("finished", False)
+                cancelled = status.get("cancelled", False)
+                
+                if cancelled: continue 
+
+                if finished:
+                    jugados.append(datos)
+                else:
+                    por_jugar.append(datos)
+            
+            jugados.sort(key=lambda x: x['fecha'], reverse=True)
+            por_jugar.sort(key=lambda x: x['fecha'], reverse=False)
+            
+            lote_final = jugados[:CANT_PARTIDOS_A_SINCRONIZAR] + por_jugar[:CANT_PARTIDOS_A_SINCRONIZAR]
+            
+            if lote_final:
+                print(f"Enviando {len(lote_final)} partidos a la BD...")
+                bd.guardar_lote_partidos(lote_final)
+                print("Sincronización de BD completada.")
+            else:
+                print("No hay partidos procesables en el lote.")
+            
+        except Exception as e:
+            print(f"Error crítico sincronizando FotMob: {e}")
+        
+        finally:
+            if hasattr(self, 'dlg_cargando_inicio') and self.dlg_cargando_inicio.open:
+                self.page.close(self.dlg_cargando_inicio)
+            
+            print("Cargando interfaz...")
+            # --- MODIFICADO: Se activa actualizar_admin=True para cargar la tabla de Equipos al inicio ---
+            self._recargar_datos(
+                actualizar_partidos=True, 
+                actualizar_pronosticos=True, 
+                actualizar_ranking=True,
+                actualizar_copas=True,
+                actualizar_admin=True 
+            )
 
     def _configurar_ventana(self):
         self.page.title = "Sistema Club Atlético Independiente"
@@ -57,123 +166,6 @@ class SistemaIndependiente:
         )
 
         self.page.add(layout)
-    
-    # --- FUNCIONES ABM PARTIDOS ---
-
-    def _limpiar_formulario_partido(self, e=None):
-        """Limpia los campos y la selección de partido"""
-        self.input_rival.value = ""
-        self.input_goles_cai.value = ""
-        self.input_goles_rival.value = ""
-        self.txt_fecha_display.value = "---"
-        self.txt_hora_display.value = "---"
-        self.date_picker.value = None
-        
-        self._actualizar_estado_goles() 
-        
-        if self.fila_partido_ref:
-            self.fila_partido_ref.selected = False
-            self.fila_partido_ref.color = None
-            try: self.fila_partido_ref.update()
-            except: pass
-            
-        self.fila_partido_ref = None
-        self.partido_seleccionado_id = None # Partido deseleccionado
-        
-        # --- LÓGICA ETIQUETA ---
-        # No hay partido seleccionado -> etiqueta oculta
-        self.txt_instruccion.visible = False
-        
-        self.page.update()
-
-    def _actualizar_estado_goles(self):
-        """
-        Habilita o deshabilita los inputs de goles según la fecha y hora.
-        Reglas: Deshabilitar si es futuro, si no tiene fecha/hora, o si la hora es 00:00.
-        """
-        deshabilitar = False
-        
-        fecha = self.date_picker.value
-        hora = self.time_picker.value
-        
-        # 1. Sin fecha seleccionada
-        if not fecha:
-            deshabilitar = True
-        
-        # 2. Sin horario (texto '---') o hora 00:00:00
-        elif self.txt_hora_display.value == "---" or (hora and hora.hour == 0 and hora.minute == 0):
-            deshabilitar = True
-            
-        # 3. Fecha en el futuro
-        else:
-            # Combinamos para comparar con ahora
-            # Si hora es None (caso raro si pasó el check de '---'), usamos min
-            hora_ref = hora if hora else datetime.min.time()
-            fecha_hora = datetime.combine(fecha, hora_ref)
-            
-            if fecha_hora > datetime.now():
-                deshabilitar = True
-
-        # Aplicar estado a los inputs
-        self.input_goles_cai.disabled = deshabilitar
-        self.input_goles_rival.disabled = deshabilitar
-        
-        # Si se deshabilitan, limpiamos los valores para evitar confusiones
-        if deshabilitar:
-            self.input_goles_cai.value = ""
-            self.input_goles_rival.value = ""
-            
-        self.page.update()
-
-    def _bloquear_ui_torneos(self, ocupado: bool):
-        """Bloquea UI de torneos y setea SU bandera específica"""
-        self.procesando_torneos = ocupado # <--- ÚNICA BANDERA QUE TOCAMOS AQUÍ
-        
-        # Inputs y Botones
-        self.input_torneo_nombre.disabled = ocupado
-        self.dd_torneo_anio.disabled = ocupado
-        self.btn_add_torneo.disabled = ocupado
-        self.btn_edit_torneo.disabled = ocupado
-        self.btn_del_torneo.disabled = ocupado
-        self.btn_clean_torneo.disabled = ocupado
-        
-        self.page.update()
-
-    def _bloquear_ui_partidos(self, ocupado: bool):
-        """Bloquea UI de partidos y setea SU bandera específica"""
-        self.procesando_partidos = ocupado # <--- ÚNICA BANDERA QUE TOCAMOS AQUÍ
-        
-        # Inputs y Botones
-        self.input_rival.disabled = ocupado
-        self.input_goles_cai.disabled = ocupado
-        self.input_goles_rival.disabled = ocupado
-        self.btn_pick_date.disabled = ocupado
-        self.btn_pick_time.disabled = ocupado
-        self.btn_add_partido.disabled = ocupado
-        self.btn_edit_partido.disabled = ocupado
-        self.btn_del_partido.disabled = ocupado
-        self.btn_clean_partido.disabled = ocupado
-        
-        self.page.update()
-
-    def _toggle_ver_futuros(self, e):
-        """Alterna entre ver todos los partidos o solo los futuros"""
-        self.solo_futuros = not self.solo_futuros
-        
-        # Actualizamos el aspecto del botón según el estado
-        if self.solo_futuros:
-            self.btn_ver_futuros.text = "Ver Todos"
-            self.btn_ver_futuros.bgcolor = "blue"
-            self.btn_ver_futuros.icon = ft.Icons.LIST
-        else:
-            self.btn_ver_futuros.text = "Por jugar"
-            self.btn_ver_futuros.bgcolor = "#333333"
-            self.btn_ver_futuros.icon = ft.Icons.UPCOMING
-            
-        self.btn_ver_futuros.update()
-        
-        # Recargamos solo la tabla de partidos
-        self._recargar_datos(actualizar_partidos=True)
 
     def _cambiar_filtro_tiempo(self, nuevo_filtro):
         """
@@ -297,16 +289,15 @@ class SistemaIndependiente:
         self.partido_a_pronosticar_id = None
         self.fila_pronostico_ref = None
         
+        # Variables nuevas para administración de equipos
+        self.rival_seleccionado_id = None
+        
         # Variables para gráficos
         self.chk_usuarios_grafico = [] 
-        self.chk_usuarios_grafico_lp = [] # NUEVO: Para el gráfico de líneas por puntos
+        self.chk_usuarios_grafico_lp = [] 
         self.usuario_grafico_barra_sel = None 
 
         # --- SELECTORES ---
-        self.date_picker = ft.DatePicker(on_change=self._fecha_cambiada, confirm_text="Seleccionar", cancel_text="Cancelar")
-        self.time_picker = ft.TimePicker(on_change=self._hora_cambiada, confirm_text="Seleccionar", cancel_text="Cancelar")
-        self.page.overlay.extend([self.date_picker, self.time_picker])
-
         self.page.appbar = ft.AppBar(
             leading=ft.Icon(ft.Icons.SECURITY, color=Estilos.COLOR_ROJO_CAI),
             leading_width=40,
@@ -345,7 +336,6 @@ class SistemaIndependiente:
 
         # --- CONTENEDOR 2: GRÁFICOS DE LÍNEA ---
         self.btn_grafico_puestos = ft.ElevatedButton("Por puestos", icon=ft.Icons.SHOW_CHART, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_puestos)
-        # NUEVO BOTÓN
         self.btn_grafico_linea_puntos = ft.ElevatedButton("Por puntos", icon=ft.Icons.SHOW_CHART, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_linea_puntos)
 
         self.contenedor_graficos = ft.Container(
@@ -359,7 +349,7 @@ class SistemaIndependiente:
                 controls=[
                     ft.Text("Gráficos de línea", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
                     self.btn_grafico_puestos,
-                    self.btn_grafico_linea_puntos # Agregado
+                    self.btn_grafico_linea_puntos 
                 ]
             )
         )
@@ -386,36 +376,6 @@ class SistemaIndependiente:
         self.input_pred_cai = ft.TextField(label="Goles CAI", width=80, text_align=ft.TextAlign.CENTER, keyboard_type=ft.KeyboardType.NUMBER, max_length=2, bgcolor="#2D2D2D", border_color="white24", color="white", on_change=self._validar_solo_numeros)
         self.input_pred_rival = ft.TextField(label="Goles Rival", width=110, text_align=ft.TextAlign.CENTER, keyboard_type=ft.KeyboardType.NUMBER, max_length=2, bgcolor="#2D2D2D", border_color="white24", color="white", on_change=self._validar_solo_numeros)
         self.btn_pronosticar = ft.ElevatedButton("Pronosticar", icon=ft.Icons.SPORTS_SOCCER, bgcolor="green", color="white", on_click=self._guardar_pronostico)
-
-        # --- CONTROLES FORMULARIO PARTIDOS ---
-        self.txt_instruccion = ft.Text("1. Seleccione un Torneo en la tabla inferior", size=12, italic=True, color="yellow", visible=False)
-        self.input_rival = ft.TextField(hint_text="Ej: Racing Club", width=200, height=40, text_size=14, content_padding=10, bgcolor="#2D2D2D", border_color="white24", color="white")
-        self.txt_fecha_display = ft.Text("---", color="white70", size=13)
-        self.txt_hora_display = ft.Text("---", color="white70", size=13)
-        self.input_goles_cai = ft.TextField(width=60, height=40, content_padding=10, bgcolor="#2D2D2D", border_color="white24", color="white", keyboard_type=ft.KeyboardType.NUMBER, input_filter=ft.InputFilter(allow=True, regex_string=r"[0-9]", replacement_string=""))
-        self.input_goles_rival = ft.TextField(width=60, height=40, content_padding=10, bgcolor="#2D2D2D", border_color="white24", color="white", keyboard_type=ft.KeyboardType.NUMBER, input_filter=ft.InputFilter(allow=True, regex_string=r"[0-9]", replacement_string=""))
-
-        self.btn_pick_date = ft.IconButton(icon=ft.Icons.CALENDAR_MONTH, icon_color="yellow", tooltip="Elegir Fecha", on_click=lambda _: self.page.open(self.date_picker))
-        self.btn_pick_time = ft.IconButton(icon=ft.Icons.ACCESS_TIME, icon_color="yellow", tooltip="Elegir Hora", on_click=lambda _: self.page.open(self.time_picker))
-
-        self.btn_add_partido = ft.IconButton(icon=ft.Icons.ADD_CIRCLE, icon_color="green", tooltip="Agregar Partido", on_click=self._agregar_partido, icon_size=40)
-        self.btn_edit_partido = ft.IconButton(icon=ft.Icons.EDIT, icon_color="blue", tooltip="Editar Partido", on_click=self._editar_partido)
-        self.btn_del_partido = ft.IconButton(icon=ft.Icons.DELETE, icon_color="red", tooltip="Eliminar Partido", on_click=self._eliminar_partido)
-        self.btn_clean_partido = ft.IconButton(icon=ft.Icons.CLEANING_SERVICES, icon_color="grey", tooltip="Limpiar Formulario", on_click=self._limpiar_formulario_partido)
-
-        # --- CONTROLES FORMULARIO TORNEOS ---
-        self.input_torneo_nombre = ft.TextField(hint_text="Nombre Torneo", width=180, height=40, text_size=14, content_padding=10, bgcolor="#2D2D2D", border_color="white24", color="white")
-        hoy = datetime.now()
-        anios_disponibles = sorted(list({(hoy - timedelta(days=30)).year, (hoy + timedelta(days=30)).year}))
-        self.dd_torneo_anio = ft.Dropdown(width=120, content_padding=5, text_size=14, bgcolor="#2D2D2D", border_color="white24", color="white", options=[ft.dropdown.Option(str(a)) for a in anios_disponibles])
-        if len(anios_disponibles) == 1: self.dd_torneo_anio.value = str(anios_disponibles[0])
-        
-        self.chk_torneo_finalizado = ft.Checkbox(label="Finalizado", value=False, label_style=ft.TextStyle(color="white"))
-
-        self.btn_add_torneo = ft.IconButton(icon=ft.Icons.ADD_CIRCLE, icon_color="green", tooltip="Agregar Nuevo", on_click=self._agregar_torneo, icon_size=40)
-        self.btn_edit_torneo = ft.IconButton(icon=ft.Icons.EDIT, icon_color="blue", tooltip="Editar Seleccionado", on_click=self._editar_torneo)
-        self.btn_del_torneo = ft.IconButton(icon=ft.Icons.DELETE, icon_color="red", tooltip="Eliminar Seleccionado", on_click=self._eliminar_torneo)
-        self.btn_clean_torneo = ft.IconButton(icon=ft.Icons.CLEANING_SERVICES, icon_color="grey", tooltip="Limpiar Formulario", on_click=self._limpiar_formulario_torneo)
 
         # --- TÍTULOS DINÁMICOS ---
         self.txt_titulo_ranking = ft.Text("Tabla de posiciones histórica", size=28, weight=ft.FontWeight.BOLD, color="white")
@@ -472,10 +432,10 @@ class SistemaIndependiente:
             ft.DataColumn(ft.Container(content=ft.Text("Torneos ganados", color="yellow", weight=ft.FontWeight.BOLD), width=120, alignment=ft.alignment.center), numeric=True)
         ]
 
-        columnas_torneos = [
-            ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Año", color="yellow", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center_left), numeric=True),
-            ft.DataColumn(ft.Container(content=ft.Text("Finalizado", color="white70", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center))
+        # Columnas para la tabla de equipos en administración
+        columnas_rivales = [
+            ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)),
+            ft.DataColumn(ft.Container(content=ft.Text("Otro nombre", color="cyan", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left))
         ]
 
         # --- DEFINICIÓN DE TABLAS ---
@@ -485,8 +445,31 @@ class SistemaIndependiente:
         self.tabla_copas_header = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_copas, rows=[])
         self.tabla_copas = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_copas, rows=[])
 
-        self.tabla_partidos_header = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_partidos, rows=[])
-        self.tabla_partidos = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_partidos, rows=[])
+        self.tabla_partidos_header = ft.DataTable(
+            bgcolor="#2D2D2D", 
+            border=ft.border.all(1, "white10"), 
+            border_radius=ft.border_radius.only(top_left=8, top_right=8), 
+            vertical_lines=ft.border.BorderSide(1, "white10"), 
+            horizontal_lines=ft.border.BorderSide(1, "white10"), 
+            heading_row_color="black", 
+            heading_row_height=70, 
+            data_row_max_height=0, 
+            column_spacing=20, 
+            columns=columnas_partidos, 
+            rows=[]
+        )
+        self.tabla_partidos = ft.DataTable(
+            bgcolor="#2D2D2D", 
+            border=ft.border.all(1, "white10"), 
+            border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), 
+            vertical_lines=ft.border.BorderSide(1, "white10"), 
+            horizontal_lines=ft.border.BorderSide(1, "white10"), 
+            heading_row_height=0, 
+            data_row_max_height=60, 
+            column_spacing=20, 
+            columns=columnas_partidos, 
+            rows=[]
+        )
 
         self.tabla_pronosticos_header = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_pronosticos, rows=[])
         
@@ -504,9 +487,38 @@ class SistemaIndependiente:
             sort_ascending=self.pronosticos_sort_asc,
             rows=[]
         )
-        
-        self.tabla_partidos_admin = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=60, column_spacing=20, show_checkbox_column=False, columns=[ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=230, alignment=ft.alignment.center_left))], rows=[])
-        self.tabla_torneos = ft.DataTable(width=550, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=8, vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=60, data_row_max_height=50, column_spacing=20, show_checkbox_column=False, columns=columnas_torneos, rows=[])
+
+        # --- TABLA RIVALES (ADMINISTRACIÓN) ---
+        self.tabla_rivales_header = ft.DataTable(
+            bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), 
+            vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), 
+            heading_row_color="black", heading_row_height=60, data_row_max_height=0, column_spacing=20, 
+            columns=columnas_rivales, rows=[]
+        )
+        self.tabla_rivales = ft.DataTable(
+            bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), 
+            vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), 
+            heading_row_height=0, data_row_max_height=60, column_spacing=20, 
+            columns=columnas_rivales, rows=[]
+        )
+
+        # --- FORMULARIO CAMBIO NOMBRE ---
+        self.input_admin_nombre = ft.TextField(label="Nombre", width=250, bgcolor="#2D2D2D", color="white", border_color="white24")
+        self.input_admin_otro = ft.TextField(label="Otro nombre", width=250, bgcolor="#2D2D2D", color="white", border_color="white24")
+        self.btn_guardar_rival = ft.ElevatedButton("Guardar", icon=ft.Icons.SAVE, bgcolor="green", color="white", on_click=self._guardar_rival_admin)
+
+        self.contenedor_admin_rivales = ft.Container(
+            content=ft.Column(
+                controls=[
+                    self.input_admin_nombre,
+                    self.input_admin_otro,
+                    ft.Container(height=10),
+                    self.btn_guardar_rival
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER
+            ),
+            padding=20
+        )
 
         # --- DEFINICIÓN DE PESTAÑAS ---
         lista_pestanas = [
@@ -656,11 +668,150 @@ class SistemaIndependiente:
         ]
 
         if usuario == "Gabriel":
-            lista_pestanas.append(ft.Tab(text="Administración", icon="admin_panel_settings", content=ft.Container(padding=0, alignment=ft.alignment.top_left, content=ft.Column(scroll=ft.ScrollMode.AUTO, controls=[ft.Container(padding=20, content=ft.Column(controls=[ft.Row(vertical_alignment=ft.CrossAxisAlignment.START, controls=[ft.Column(controls=[self.loading_admin, ft.Text("Partidos Registrados", size=20, weight=ft.FontWeight.BOLD, color="white"), ft.Container(content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_partidos_admin]), height=350, width=720),]), ft.Container(width=30), ft.Container(width=380, padding=20, border=ft.border.all(1, "white24"), border_radius=10, bgcolor="#1E1E1E", content=ft.Column(tight=True, spacing=15, controls=[ft.Text("Agregar / Editar Partido", size=18, weight=ft.FontWeight.BOLD, color="white"), ft.Divider(color="white24"), self.txt_instruccion, ft.Row(controls=[ft.Text("Rival:", width=60, color="white", weight=ft.FontWeight.BOLD), self.input_rival], alignment=ft.MainAxisAlignment.START), ft.Row(controls=[ft.Text("Fecha:", width=50, color="white", weight=ft.FontWeight.BOLD), self.btn_pick_date, self.txt_fecha_display, ft.Container(width=10), ft.Text("Hora:", width=45, color="white", weight=ft.FontWeight.BOLD), self.btn_pick_time, self.txt_hora_display], alignment=ft.MainAxisAlignment.START), ft.Row(controls=[ft.Text("Goles CAI:", width=80, color="white", weight=ft.FontWeight.BOLD), self.input_goles_cai]), ft.Row(controls=[ft.Text("Goles Rival:", width=80, color="white", weight=ft.FontWeight.BOLD), self.input_goles_rival]), ft.Container(height=10), ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[self.btn_add_partido, ft.Row(spacing=5, controls=[self.btn_edit_partido, self.btn_del_partido, self.btn_clean_partido])])]))]), ft.Container(height=40), ft.Row(vertical_alignment=ft.CrossAxisAlignment.START, controls=[ft.Column(controls=[self.loading_torneos_admin, ft.Text("Torneos Registrados", size=20, weight=ft.FontWeight.BOLD, color="white"), ft.Container(content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_torneos]), height=300, width=550)]), ft.Container(width=30), ft.Container(width=450, padding=20, border=ft.border.all(1, "white24"), border_radius=10, bgcolor="#1E1E1E", content=ft.Column(tight=True, spacing=15, controls=[ft.Text("Gestión de Torneos", size=18, weight=ft.FontWeight.BOLD, color="white"), ft.Divider(color="white24"), ft.Row(controls=[self.input_torneo_nombre, self.dd_torneo_anio], alignment=ft.MainAxisAlignment.SPACE_BETWEEN), self.chk_torneo_finalizado, ft.Container(height=10), ft.Row(alignment=ft.MainAxisAlignment.SPACE_BETWEEN, controls=[self.btn_add_torneo, ft.Row(spacing=5, controls=[self.btn_edit_torneo, self.btn_del_torneo, self.btn_clean_torneo])])]))])]))]))))
+            lista_pestanas.append(
+                ft.Tab(
+                    text="Administración", 
+                    icon="admin_panel_settings", 
+                    content=ft.Container(
+                        padding=20, 
+                        alignment=ft.alignment.top_left, 
+                        content=ft.Column(
+                            scroll=ft.ScrollMode.AUTO, 
+                            controls=[
+                                ft.Text("Equipos", size=20, weight=ft.FontWeight.BOLD, color="white"),
+                                self.loading_admin,
+                                ft.Row(
+                                    vertical_alignment=ft.CrossAxisAlignment.START,
+                                    controls=[
+                                        # Tabla Izquierda
+                                        ft.Column(
+                                            spacing=0,
+                                            controls=[
+                                                self.tabla_rivales_header,
+                                                ft.Container(
+                                                    height=300,
+                                                    content=ft.Column(
+                                                        scroll=ft.ScrollMode.ALWAYS,
+                                                        controls=[self.tabla_rivales]
+                                                    )
+                                                )
+                                            ]
+                                        ),
+                                        ft.Container(width=20),
+                                        # Formulario Derecha
+                                        ft.Card(
+                                            content=ft.Container(
+                                                content=ft.Column([
+                                                    ft.Container(padding=10, content=ft.Text("Cambiar nombre", weight="bold", size=16)),
+                                                    self.contenedor_admin_rivales
+                                                ]),
+                                                padding=10
+                                            )
+                                        )
+                                    ]
+                                )
+                            ]
+                        )
+                    )
+                )
+            )
+
+        # --- DEFINICIÓN DEL DIÁLOGO DE CARGA ---
+        self.dlg_cargando_inicio = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Actualizando información..."),
+            content=ft.Column([
+                ft.ProgressBar(width=300, color="amber", bgcolor="#222222"),
+                ft.Container(height=10),
+                ft.Text("Buscando nuevos partidos y resultados. Esto puede demorar unos segundos...")
+            ], height=100, alignment=ft.MainAxisAlignment.CENTER),
+            actions=[], # Sin botones para obligar a esperar
+        )
 
         mis_pestanas = ft.Tabs(selected_index=0, expand=True, tabs=lista_pestanas)
         self.page.add(mis_pestanas)
-        self._recargar_datos(actualizar_partidos=True, actualizar_torneos=True, actualizar_admin=True, actualizar_pronosticos=True, actualizar_ranking=True)
+        
+        # --- LÓGICA DE INICIO ---
+        self.page.open(self.dlg_cargando_inicio)
+        threading.Thread(target=self._sincronizar_fixture_api, daemon=True).start()
+
+    def _procesar_partido_fotmob(self, match):
+        """
+        Extrae datos limpios de un objeto partido de FotMob con validaciones.
+        """
+        try:
+            # Validación inicial de tipo
+            if not isinstance(match, dict): return None
+
+            # 1. FECHA
+            status = match.get("status", {})
+            if not isinstance(status, dict): return None # Seguridad extra
+            
+            fecha_str = status.get("utcTime")
+            if not fecha_str: return None
+            
+            # Limpieza fecha ISO
+            fecha_str = fecha_str.replace("Z", "+00:00")
+            try:
+                fecha_dt = datetime.fromisoformat(fecha_str).replace(tzinfo=None)
+            except ValueError:
+                return None
+
+            # 2. EQUIPOS
+            home = match.get("home", {})
+            away = match.get("away", {})
+            
+            # Asegurar IDs numéricos
+            try:
+                id_home = int(home.get("id") or 0)
+            except: id_home = 0
+            
+            # Si Independiente no juega, ignorar
+            if id_home != ID_INDEPENDIENTE and int(away.get("id") or 0) != ID_INDEPENDIENTE:
+                return None
+
+            # Extracción segura de nombres y goles
+            score_str = status.get("scoreStr", "")
+            finished = status.get("finished", False)
+            
+            goles_cai = None
+            goles_rival = None
+
+            if id_home == ID_INDEPENDIENTE:
+                # LOCAL
+                nombre_rival = away.get("name", "Rival Desconocido")
+                if finished and score_str and " - " in score_str:
+                    try:
+                        partes = score_str.split(" - ")
+                        goles_cai = int(partes[0])
+                        goles_rival = int(partes[1])
+                    except: pass
+            else:
+                # VISITANTE
+                nombre_rival = home.get("name", "Rival Desconocido")
+                if finished and score_str and " - " in score_str:
+                    try:
+                        partes = score_str.split(" - ")
+                        goles_cai = int(partes[1]) # Invertido
+                        goles_rival = int(partes[0])
+                    except: pass
+
+            # 3. TORNEO
+            nombre_torneo = match.get("league", {}).get("name", "Liga Profesional")
+            anio_temporada = str(fecha_dt.year)
+
+            return {
+                'rival': nombre_rival,
+                'torneo': nombre_torneo,
+                'anio': anio_temporada,
+                'fecha': fecha_dt,
+                'goles_cai': goles_cai,
+                'goles_rival': goles_rival
+            }
+
+        except Exception as e:
+            print(f"Error procesando item individual: {e}")
+            return None 
 
     def _ordenar_tabla_pronosticos(self, e):
         """Maneja el evento de ordenar columnas en la tabla de pronósticos"""
@@ -1073,24 +1224,46 @@ class SistemaIndependiente:
         threading.Thread(target=_tarea, daemon=True).start()
 
     def _seleccionar_partido_para_pronostico(self, e):
-        """Selecciona un partido en la tabla del usuario para pronosticar."""
-        if self.cargando_partidos: return
+        """
+        Maneja la selección de un partido en la tabla para permitir pronosticar.
+        Guarda el ID y rellena los inputs si ya existe un pronóstico visual.
+        """
+        # Si el usuario deselecciona la fila (clickea la misma de nuevo)
+        if not e.control.selected:
+            self.partido_a_pronosticar_id = None
+            self.input_pred_cai.value = ""
+            self.input_pred_rival.value = ""
+            self.page.update()
+            return
 
-        fila_cliqueada = e.control
+        # Si selecciona una fila nueva
+        self.partido_a_pronosticar_id = e.control.data
         
-        # Guardar ID seleccionado
-        self.partido_a_pronosticar_id = fila_cliqueada.data
+        # Truco visual: Desmarcar las otras filas para que parezca selección única
+        for row in self.tabla_partidos.rows:
+            if row != e.control:
+                row.selected = False
+        e.control.selected = True 
         
-        # Efecto visual de selección
-        for fila in self.tabla_partidos.rows:
-            if fila == fila_cliqueada:
-                fila.selected = True
-                fila.color = ft.Colors.with_opacity(0.5, "blue")
-                self.fila_pronostico_ref = fila
+        # Intentar pre-llenar los inputs leyendo la celda de la tabla
+        # La columna 4 es "Tu pronóstico" y tiene formato "GOL a GOL" o "-"
+        try:
+            # Estructura: DataCell -> Container -> Text -> value
+            texto_celda = e.control.cells[4].content.content.value
+            
+            if " a " in texto_celda:
+                partes = texto_celda.split(" a ")
+                self.input_pred_cai.value = partes[0]
+                self.input_pred_rival.value = partes[1]
             else:
-                fila.selected = False
-                fila.color = None
-                
+                # Si es "-" limpiamos
+                self.input_pred_cai.value = ""
+                self.input_pred_rival.value = ""
+        except Exception:
+            # Si falla la lectura visual, solo limpiamos
+            self.input_pred_cai.value = ""
+            self.input_pred_rival.value = ""
+            
         self.page.update()
 
     def _guardar_pronostico(self, e):
@@ -1126,8 +1299,8 @@ class SistemaIndependiente:
                 self.input_pred_cai.value = ""
                 self.input_pred_rival.value = ""
                 
-                # CORRECCIÓN: Solo actualizar partidos y pronósticos globales. Ranking NO se toca.
-                self._recargar_datos(actualizar_partidos=True, actualizar_pronosticos=True, actualizar_ranking=False)
+                # CORRECCIÓN: Pronósticos no afectan copas históricas.
+                self._recargar_datos(actualizar_partidos=True, actualizar_pronosticos=True, actualizar_ranking=False, actualizar_copas=False)
                 
             except Exception as ex:
                 GestorMensajes.mostrar(self.page, "Error", f"No se pudo guardar: {ex}", "error")
@@ -1224,6 +1397,25 @@ class SistemaIndependiente:
         # Recargar solo pronósticos
         self._recargar_datos(actualizar_pronosticos=True)
 
+    def _confirmar_filtro_torneo_pronosticos(self, e):
+        """
+        Confirma la selección de Torneo + Año para el filtro de Pronósticos.
+        Construye el nombre completo (Ej: "Liga Profesional 2025") y recarga.
+        """
+        if self.temp_campeonato_sel and self.temp_anio_sel:
+            # Construimos el string que coincide con la columna de la BD
+            nombre_completo = f"{self.temp_campeonato_sel} {self.temp_anio_sel}"
+            self.filtro_pron_torneo = nombre_completo
+            
+            # Actualizamos estado visual del botón filtro
+            self.btn_pron_por_torneo.bgcolor = "blue"
+            self.btn_pron_por_torneo.update()
+            
+            # Actualizamos título y tabla
+            self._actualizar_titulo_pronosticos()
+            self.page.close(self.dlg_modal)
+            self._recargar_datos(actualizar_pronosticos=True)
+
     def _abrir_selector_torneo_pronosticos(self, e):
         # Reutilizamos el mismo diseño del modal, pero cambiamos la acción del botón "Ver"
         self.lv_torneos = ft.ListView(expand=True, spacing=5, height=200)
@@ -1311,32 +1503,156 @@ class SistemaIndependiente:
         self.btn_ver_anio.disabled = False
         self.btn_ver_anio.update()
 
-    def _recargar_datos(self, actualizar_partidos=False, actualizar_torneos=False, actualizar_admin=False, actualizar_pronosticos=False, actualizar_ranking=False, actualizar_copas=True):
-        # Activamos las banderas correspondientes
-        if actualizar_partidos:
-            self.cargando_partidos = True
-        if actualizar_torneos:
-            self.cargando_torneos = True
+    def _seleccionar_partido_click(self, id_partido):
+        """
+        Simula la selección de una fila tipo 'Treeview'.
+        Recibe el ID del partido desde el evento on_click de la celda.
+        """
+        # Si toco el mismo que ya estaba seleccionado, lo desmarco
+        if self.partido_a_pronosticar_id == id_partido:
+            self.partido_a_pronosticar_id = None
+            self.input_pred_cai.value = ""
+            self.input_pred_rival.value = ""
             
-        if not any([actualizar_partidos, actualizar_torneos, actualizar_admin, actualizar_pronosticos, actualizar_ranking]):
+            # Desmarcar todo (quitar color)
+            for row in self.tabla_partidos.rows:
+                row.color = None
+            self.page.update()
             return
 
-        if actualizar_ranking:
-            self.loading.visible = True
-            
-        # Lógica visual de Copas: solo si se pide actualizar Y no hay filtro de torneo activo
-        if actualizar_copas and self.filtro_ranking_edicion_id is None:
-            self.loading_copas.visible = True 
+        # Nueva selección
+        self.partido_a_pronosticar_id = id_partido
         
-        if actualizar_partidos:
+        # Iteramos filas para pintar la correcta y leer sus datos
+        for row in self.tabla_partidos.rows:
+            if row.data == id_partido:
+                row.color = "#8B0000" # Rojo oscuro
+                
+                # Intentamos leer el pronóstico visual de la celda 4
+                try:
+                    # Estructura: DataCell -> Container -> Text -> value
+                    texto_celda = row.cells[4].content.content.value
+                    if " a " in texto_celda:
+                        partes = texto_celda.split(" a ")
+                        self.input_pred_cai.value = partes[0]
+                        self.input_pred_rival.value = partes[1]
+                    else:
+                        self.input_pred_cai.value = ""
+                        self.input_pred_rival.value = ""
+                except:
+                    self.input_pred_cai.value = ""
+                    self.input_pred_rival.value = ""
+            else:
+                row.color = None
+        
+        self.page.update()
+
+    def _seleccionar_rival_admin(self, id_rival):
+        """Maneja el clic en la tabla de administración de equipos (Sin Recarga de BD)."""
+        self.rival_seleccionado_id = id_rival
+        
+        # Recorrer filas para pintar la correcta y extraer datos de la UI
+        encontrado = False
+        for row in self.tabla_rivales.rows:
+            if row.data == id_rival:
+                row.color = "#8B0000" # Pintar Rojo Oscuro
+                
+                # Extraer datos visuales de las celdas (Cell 0: Nombre, Cell 1: Otro Nombre)
+                # Estructura visual: DataCell -> Container -> Text -> value
+                try:
+                    nombre_ui = row.cells[0].content.content.value
+                    otro_ui = row.cells[1].content.content.value
+                    
+                    self.input_admin_nombre.value = nombre_ui
+                    self.input_admin_otro.value = otro_ui
+                    self.input_admin_nombre.update()
+                    self.input_admin_otro.update()
+                except Exception as e:
+                    print(f"Error leyendo datos de la fila: {e}")
+                
+                encontrado = True
+            else:
+                row.color = None # Despintar las otras
+        
+        if encontrado:
+            self.tabla_rivales.update()
+
+    def _guardar_rival_admin(self, e):
+        """Guarda los cambios con validaciones y recarga tablas (sin Ranking)."""
+        if not self.rival_seleccionado_id:
+            GestorMensajes.mostrar(self.page, "Error", "Seleccione un equipo de la tabla.", "error")
+            return
+            
+        nombre = self.input_admin_nombre.value.strip()
+        otro = self.input_admin_otro.value.strip()
+        
+        # VALIDACIONES
+        if not nombre:
+            GestorMensajes.mostrar(self.page, "Error", "El nombre es obligatorio.", "error")
+            return
+
+        if not otro:
+            GestorMensajes.mostrar(self.page, "Error", "El 'Otro nombre' no puede estar vacío.", "error")
+            return
+
+        if nombre.lower() == otro.lower():
+            GestorMensajes.mostrar(self.page, "Error", "El 'Otro nombre' debe ser distinto al 'Nombre'.", "error")
+            return
+
+        def _guardar():
+            # 1. Mostrar animaciones de carga INMEDIATAMENTE (sin vaciar tablas aún)
             self.loading_partidos.visible = True
-            self._bloquear_botones_filtros(True) 
-        if actualizar_pronosticos: 
             self.loading_pronosticos.visible = True
-        if actualizar_admin:
-            self.loading_admin.visible = True 
-        if actualizar_torneos:
-            self.loading_torneos_admin.visible = True
+            self.loading_admin.visible = True
+            self.page.update()
+            
+            # 2. Guardar en BD
+            try:
+                bd = BaseDeDatos()
+                bd.actualizar_rival(self.rival_seleccionado_id, nombre, otro)
+                
+                GestorMensajes.mostrar(self.page, "Éxito", "Equipo actualizado.", "exito")
+                
+                # Limpiar formulario
+                self.rival_seleccionado_id = None
+                self.input_admin_nombre.value = ""
+                self.input_admin_otro.value = ""
+                
+                # 3. Recargar tablas afectadas (Partidos, Pronósticos, Equipos)
+                # IMPORTANTE: actualizar_ranking=False para no tocar la tabla de posiciones
+                self._recargar_datos(
+                    actualizar_partidos=True, 
+                    actualizar_pronosticos=True, 
+                    actualizar_ranking=False, # No recargar ranking
+                    actualizar_admin=True,    # Recargar tabla de equipos
+                    actualizar_copas=False
+                )
+                
+            except Exception as ex:
+                GestorMensajes.mostrar(self.page, "Error", f"No se pudo guardar: {ex}", "error")
+                # Si hubo error, ocultamos las barras que prendimos
+                self.loading_partidos.visible = False
+                self.loading_pronosticos.visible = False
+                self.loading_admin.visible = False
+                self.page.update()
+
+        threading.Thread(target=_guardar, daemon=True).start()
+
+    def _recargar_datos(self, actualizar_partidos=False, actualizar_pronosticos=False, actualizar_ranking=False, actualizar_copas=True, actualizar_admin=False):
+        if actualizar_partidos:
+            self.cargando_partidos = True
+            
+        if not any([actualizar_partidos, actualizar_pronosticos, actualizar_ranking, actualizar_admin]):
+            return
+
+        if actualizar_ranking: self.loading.visible = True
+        
+        if actualizar_ranking and actualizar_copas and self.filtro_ranking_edicion_id is None: 
+            self.loading_copas.visible = True 
+            
+        if actualizar_partidos: self.loading_partidos.visible = True; self._bloquear_botones_filtros(True) 
+        if actualizar_pronosticos: self.loading_pronosticos.visible = True
+        if actualizar_admin: self.loading_admin.visible = True
         
         if actualizar_pronosticos:
              self.tabla_pronosticos.sort_column_index = self.pronosticos_sort_col_index
@@ -1346,23 +1662,11 @@ class SistemaIndependiente:
         
         def _tarea_en_segundo_plano():
             time.sleep(0.5)
-            
-            if actualizar_torneos:
-                self.fila_seleccionada_ref = None
-                self.edicion_seleccionada_id = None
-            if actualizar_admin: 
-                self.fila_partido_ref = None
-                self.partido_seleccionado_id = None
-            if actualizar_partidos: 
-                self.fila_pronostico_ref = None
-                self.partido_a_pronosticar_id = None
-
             try:
                 bd = BaseDeDatos()
                 
                 # --- 0. RANKING Y COPAS ---
                 if actualizar_ranking:
-                    # Ranking General o por Torneo o por Año
                     datos_ranking = bd.obtener_ranking(edicion_id=self.filtro_ranking_edicion_id, anio=self.filtro_ranking_anio)
                     filas_tabla_ranking = []
                     for i, fila in enumerate(datos_ranking, start=1):
@@ -1376,20 +1680,15 @@ class SistemaIndependiente:
                         ]))
                     self.tabla_estadisticas.rows = filas_tabla_ranking
                     
-                    # --- LÓGICA DE TABLA DE COPAS ---
-                    # Solo recargamos si se solicitó explícitamente Y no estamos filtrando por torneo
                     if actualizar_copas and self.filtro_ranking_edicion_id is None:
                         anio_para_copas = self.filtro_ranking_anio
                         datos_copas = bd.obtener_torneos_ganados(anio=anio_para_copas)
-                        
                         filas_copas = []
                         for i, fila in enumerate(datos_copas, start=1):
-                            usuario_copa = fila[0]
-                            cantidad_copas = fila[1]
                             filas_copas.append(ft.DataRow(cells=[
                                 ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")),
-                                ft.DataCell(ft.Container(content=ft.Text(str(usuario_copa), weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left)),
-                                ft.DataCell(ft.Container(content=ft.Text(str(cantidad_copas), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=120, alignment=ft.alignment.center))
+                                ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left)),
+                                ft.DataCell(ft.Container(content=ft.Text(str(fila[1]), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=120, alignment=ft.alignment.center))
                             ]))
                         self.tabla_copas.rows = filas_copas
 
@@ -1414,30 +1713,30 @@ class SistemaIndependiente:
                         pred_rival = fila[9]
                         puntos_usuario = fila[10] 
 
-                        if gc is not None and gr is not None:
-                            texto_resultado = f"{gc} a {gr}"
+                        if gc is not None and gr is not None: texto_resultado = f"{gc} a {gr}"
                         else: texto_resultado = "-"
-                        if pred_cai is not None and pred_rival is not None:
-                            texto_pronostico = f"{pred_cai} a {pred_rival}"
+                        if pred_cai is not None and pred_rival is not None: texto_pronostico = f"{pred_cai} a {pred_rival}"
                         else: texto_pronostico = "-"
-                        if puntos_usuario is None:
-                            texto_puntos = "-"
+                        if puntos_usuario is None: texto_puntos = "-"
                         else: texto_puntos = f"{puntos_usuario}"
+
+                        color_fila = "#8B0000" if p_id == self.partido_a_pronosticar_id else None
 
                         filas_tabla_partidos.append(ft.DataRow(
                             cells=[
-                                ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=250, alignment=ft.alignment.center_left)), 
-                                ft.DataCell(ft.Container(content=ft.Text(texto_resultado, color="white", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center)),
-                                ft.DataCell(ft.Text(fecha_display_str, color="white70")), 
-                                ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left)),
-                                ft.DataCell(ft.Container(content=ft.Text(texto_pronostico, color="cyan", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center)),
-                                ft.DataCell(ft.Container(content=ft.Text(texto_puntos, color="green", weight=ft.FontWeight.BOLD, size=15), alignment=ft.alignment.center))
+                                ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=250, alignment=ft.alignment.center_left, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))), 
+                                ft.DataCell(ft.Container(content=ft.Text(texto_resultado, color="white", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))),
+                                ft.DataCell(ft.Container(content=ft.Text(fecha_display_str, color="white70"), width=140, alignment=ft.alignment.center_left, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))), 
+                                ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))),
+                                ft.DataCell(ft.Container(content=ft.Text(texto_pronostico, color="cyan", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))),
+                                ft.DataCell(ft.Container(content=ft.Text(texto_puntos, color="green", weight=ft.FontWeight.BOLD, size=15), alignment=ft.alignment.center, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id)))
                             ],
-                            data=p_id, on_select_changed=self._seleccionar_partido_para_pronostico, selected=False
+                            data=p_id,
+                            color=color_fila 
                         ))
                     self.tabla_partidos.rows = filas_tabla_partidos
 
-                # --- 1.B CARGAR PRONÓSTICOS (LÓGICA COMBINADA) ---
+                # --- 1.B CARGAR PRONÓSTICOS ---
                 if actualizar_pronosticos:
                     datos_pronosticos = bd.obtener_todos_pronosticos()
                     ahora = datetime.now()
@@ -1470,8 +1769,7 @@ class SistemaIndependiente:
                             datos_pronosticos.sort(key=key_func, reverse=reverse_manual)
                     else:
                         reversa = True 
-                        if self.filtro_pron_tiempo == 'futuros':
-                            reversa = False
+                        if self.filtro_pron_tiempo == 'futuros': reversa = False
                         datos_pronosticos.sort(key=lambda x: x[1] if isinstance(x[1], datetime) else datetime.min, reverse=reversa)
 
                     filas_tabla_pronosticos = []
@@ -1488,32 +1786,21 @@ class SistemaIndependiente:
                         fecha_pred = fila[9]
 
                         if isinstance(fecha, datetime):
-                            if fecha.hour == 0 and fecha.minute == 0:
-                                txt_fecha = fecha.strftime("%d/%m/%Y s. h.") 
-                            else:
-                                txt_fecha = fecha.strftime("%d/%m/%Y %H:%M") 
-                        else:
-                            txt_fecha = str(fecha)
+                            if fecha.hour == 0 and fecha.minute == 0: txt_fecha = fecha.strftime("%d/%m/%Y s. h.") 
+                            else: txt_fecha = fecha.strftime("%d/%m/%Y %H:%M") 
+                        else: txt_fecha = str(fecha)
                         
-                        if isinstance(fecha_pred, datetime):
-                            txt_fecha_pred = fecha_pred.strftime("%d/%m/%Y %H:%M") 
-                        else:
-                            txt_fecha_pred = str(fecha_pred) if fecha_pred else "-"
+                        if isinstance(fecha_pred, datetime): txt_fecha_pred = fecha_pred.strftime("%d/%m/%Y %H:%M") 
+                        else: txt_fecha_pred = str(fecha_pred) if fecha_pred else "-"
 
                         if gc is not None and gr is not None: txt_res = f"{gc} a {gr}"
                         else: txt_res = "-"
                         if pgc is not None and pgr is not None: txt_pron = f"{pgc} a {pgr}"
                         else: txt_pron = "-"
                         
-                        if puntos is None: 
-                            txt_puntos = "-"
-                            color_puntos = "white"
-                        elif puntos == 0:
-                            txt_puntos = "0"
-                            color_puntos = "white" 
-                        else:
-                            txt_puntos = f"+{puntos}"
-                            color_puntos = "green"
+                        if puntos is None: txt_puntos = "-"; color_puntos = "white"
+                        elif puntos == 0: txt_puntos = "0"; color_puntos = "white" 
+                        else: txt_puntos = f"+{puntos}"; color_puntos = "green"
 
                         filas_tabla_pronosticos.append(ft.DataRow(cells=[
                             ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=250, alignment=ft.alignment.center_left)), 
@@ -1527,66 +1814,38 @@ class SistemaIndependiente:
                         ]))
                     self.tabla_pronosticos.rows = filas_tabla_pronosticos
 
-                # --- 2. TABLA ADMIN ---
+                # --- 2. TABLA ADMIN (RIVALES) ---
                 if actualizar_admin:
-                    datos_admin = bd.obtener_partidos(self.usuario_actual, filtro='todos')
-                    filas_tabla_admin = [] 
-                    for fila in datos_admin:
-                        p_id = fila[0]
-                        rival = fila[1]
-                        fecha_obj = fila[2]
-                        torneo = fila[3]
-                        gc = fila[4]
-                        gr = fila[5]
-                        ed_id = fila[6]
-                        fecha_display_str = fila[7] 
-                        if gc is not None and gr is not None: texto_resultado = f"{gc} a {gr}"
-                        else: texto_resultado = "-"
-
-                        filas_tabla_admin.append(ft.DataRow(cells=[ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=250, alignment=ft.alignment.center_left)), ft.DataCell(ft.Container(content=ft.Text(texto_resultado, color="white", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center)), ft.DataCell(ft.Text(fecha_display_str, color="white70")), ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=230, alignment=ft.alignment.center_left))], data={'id': p_id, 'rival': rival, 'fecha': fecha_obj, 'goles_cai': gc, 'goles_rival': gr, 'edicion_id': ed_id}, on_select_changed=self._seleccionar_partido, selected=False))
-                    self.tabla_partidos_admin.rows = filas_tabla_admin
-
-                # --- 3. TORNEOS ---
-                if actualizar_torneos:
-                    datos_ediciones = bd.obtener_ediciones()
-                    filas_torneos = []
-                    for ed in datos_ediciones:
-                        ed_id = ed[0]
-                        nombre = ed[1]
-                        anio = ed[2]
-                        finalizado = ed[3] 
+                    datos_rivales = bd.obtener_rivales_completo()
+                    filas_tabla_rivales = []
+                    for fila in datos_rivales:
+                        r_id = fila[0]
+                        nombre = fila[1]
+                        otro = fila[2] if fila[2] else "" # NULL a vacío
                         
-                        txt_finalizado = "Sí" if finalizado else "No"
-                        color_finalizado = "green" if finalizado else "white"
-
-                        filas_torneos.append(ft.DataRow(cells=[
-                            ft.DataCell(ft.Container(content=ft.Text(str(nombre), color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), 
-                            ft.DataCell(ft.Container(content=ft.Text(str(anio), color="yellow", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center_left)),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_finalizado, color=color_finalizado, weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center))
-                        ], data={ 
-                            'id': ed_id,
-                            'finalizado': finalizado
-                        }, on_select_changed=self._seleccionar_torneo, selected=False))
-                    self.tabla_torneos.rows = filas_torneos
+                        color_fila_rival = "#8B0000" if r_id == self.rival_seleccionado_id else None
+                        
+                        filas_tabla_rivales.append(ft.DataRow(
+                            cells=[
+                                ft.DataCell(ft.Container(content=ft.Text(str(nombre), color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left, on_click=lambda e, id=r_id: self._seleccionar_rival_admin(id))),
+                                ft.DataCell(ft.Container(content=ft.Text(str(otro), color="cyan", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left, on_click=lambda e, id=r_id: self._seleccionar_rival_admin(id)))
+                            ],
+                            color=color_fila_rival,
+                            data=r_id # <--- SE AGREGÓ ESTO PARA IDENTIFICAR LA FILA
+                        ))
+                    self.tabla_rivales.rows = filas_tabla_rivales
 
             except Exception as e:
                 print(f"Error recargando datos: {e}")
             
             finally:
-                self.editando_torneo = False
                 self.loading.visible = False
                 self.loading_copas.visible = False 
                 self.loading_partidos.visible = False
                 self.loading_pronosticos.visible = False 
                 self.loading_admin.visible = False
-                self.loading_torneos_admin.visible = False
                 
-                if actualizar_partidos:
-                    self.cargando_partidos = False
-                    self._bloquear_botones_filtros(False) 
-                
-                if actualizar_torneos:
-                    self.cargando_torneos = False
+                if actualizar_partidos: self.cargando_partidos = False; self._bloquear_botones_filtros(False) 
                     
                 self.page.update()
 
@@ -1656,7 +1915,7 @@ class SistemaIndependiente:
                 self.btn_por_equipo.update()
                 
                 self.page.close(self.dlg_modal)
-                self._recargar_datos(actualizar_partidos=True)
+                self._recargar_datos(actualizar_partidos=True, actualizar_copas=False)
 
     def _abrir_selector_equipo(self, e):
         """Abre un diálogo modal para seleccionar un equipo rival."""
@@ -1762,7 +2021,7 @@ class SistemaIndependiente:
             self.btn_por_equipo.update()
             
             self.page.close(self.dlg_modal_equipo)
-            self._recargar_datos(actualizar_partidos=True)
+            self._recargar_datos(actualizar_partidos=True, actualizar_copas=False)
 
     # --- FUNCIONES GRÁFICO DE PUESTOS ---
 
@@ -2036,8 +2295,8 @@ class SistemaIndependiente:
         self.btn_sin_pronosticar.update()
         self.btn_por_equipo.update()
         
-        # CORRECCIÓN: Solo partidos. Nada más.
-        self._recargar_datos(actualizar_partidos=True, actualizar_ranking=False)
+        # CORRECCIÓN: Solo partidos. Ranking y Copas NO.
+        self._recargar_datos(actualizar_partidos=True, actualizar_ranking=False, actualizar_copas=False)
 
     def _abrir_selector_torneo_ranking(self, e):
         # --- 1. LÓGICA DE TOGGLE ---
@@ -2265,64 +2524,6 @@ class SistemaIndependiente:
             self.page.close(self.dlg_modal_anio)
             self._recargar_datos(actualizar_ranking=True)
 
-    # --- FUNCIONES ABM TORNEOS ---
-    def _limpiar_formulario_torneo(self, e=None):
-        """Limpia inputs, deselecciona la fila y resetea variables"""
-        self.input_torneo_nombre.value = ""
-        self.chk_torneo_finalizado.value = False # Resetear check
-        
-        if self.dd_torneo_anio.options:
-             self.dd_torneo_anio.value = self.dd_torneo_anio.options[0].key
-             
-        if self.fila_seleccionada_ref:
-            self.fila_seleccionada_ref.selected = False
-            self.fila_seleccionada_ref.color = None
-            try:
-                self.fila_seleccionada_ref.update()
-            except: pass
-            
-        self.fila_seleccionada_ref = None
-        self.edicion_seleccionada_id = None 
-        
-        if self.partido_seleccionado_id is not None:
-            self.txt_instruccion.visible = True
-        else:
-            self.txt_instruccion.visible = False
-        
-        self.page.update()
-
-    def _agregar_torneo(self, e):
-        def _tarea():
-            self.loading_torneos_admin.visible = True
-            self.page.update()
-            self._bloquear_ui_torneos(True)
-            try:
-                nombre = self.input_torneo_nombre.value.strip()
-                anio_str = self.dd_torneo_anio.value
-                es_finalizado = self.chk_torneo_finalizado.value # Leer valor
-
-                if not nombre or not anio_str:
-                    GestorMensajes.mostrar(self.page, "Atención", "Complete nombre y año.", "error")
-                    self.loading_torneos_admin.visible = False
-                    self.page.update()
-                    return
-                
-                bd = BaseDeDatos()
-                bd.crear_torneo(nombre, int(anio_str), es_finalizado) # Pasar valor
-                GestorMensajes.mostrar(self.page, "Éxito", "Torneo creado.", "exito")
-                self._limpiar_formulario_torneo()
-                
-                self._recargar_datos(actualizar_torneos=True, actualizar_partidos=False)
-                
-            except Exception as ex:
-                GestorMensajes.mostrar(self.page, "Error", str(ex), "error")
-                self.loading_torneos_admin.visible = False
-                self.page.update()
-            finally:
-                self._bloquear_ui_torneos(False)
-
-        threading.Thread(target=_tarea, daemon=True).start()
-
     def _bloquear_botones_filtros(self, bloquear):
         """Habilita o deshabilita los botones de filtro de partidos."""
         self.btn_todos.disabled = bloquear
@@ -2330,469 +2531,6 @@ class SistemaIndependiente:
         self.btn_por_jugar.disabled = bloquear
         self.btn_por_torneo.disabled = bloquear
         self.btn_sin_pronosticar.disabled = bloquear
-
-    def _editar_torneo(self, e):
-        def _tarea():
-            self.loading_torneos_admin.visible = True
-            self.loading_partidos.visible = True 
-            self.loading_admin.visible = True 
-            self.page.update()
-            
-            self._bloquear_ui_torneos(True)
-            self.procesando_partidos = True 
-            
-            self.editando_torneo = True
-
-            try:
-                if not self.edicion_seleccionada_id:
-                    GestorMensajes.mostrar(self.page, "Atención", "Seleccione un torneo para editar.", "error")
-                    self.loading_torneos_admin.visible = False
-                    self.loading_partidos.visible = False
-                    self.loading_admin.visible = False
-                    self.editando_torneo = False 
-                    self.page.update()
-                    return
-
-                nombre = self.input_torneo_nombre.value.strip()
-                anio_str = self.dd_torneo_anio.value
-                es_finalizado = self.chk_torneo_finalizado.value
-                
-                if not nombre or not anio_str:
-                     GestorMensajes.mostrar(self.page, "Error", "Complete todos los campos.", "error")
-                     self.loading_torneos_admin.visible = False
-                     self.loading_partidos.visible = False
-                     self.loading_admin.visible = False
-                     self.editando_torneo = False 
-                     self.page.update()
-                     return
-
-                bd = BaseDeDatos()
-                bd.editar_torneo(self.edicion_seleccionada_id, nombre, int(anio_str), es_finalizado)
-                GestorMensajes.mostrar(self.page, "Éxito", "Torneo modificado.", "exito")
-                self._limpiar_formulario_torneo()
-                
-                # RECARGA: Actualiza todo (incluyendo ranking, porque al finalizar torneo cambia quien ganó copa)
-                self._recargar_datos(actualizar_torneos=True, actualizar_partidos=True, actualizar_admin=True, actualizar_ranking=True)
-                
-            except Exception as ex:
-                GestorMensajes.mostrar(self.page, "Error", str(ex), "error")
-                self.loading_torneos_admin.visible = False
-                self.loading_partidos.visible = False
-                self.loading_admin.visible = False
-                self.editando_torneo = False 
-                self.page.update()
-            finally:
-                self._bloquear_ui_torneos(False)
-                self.procesando_partidos = False
-
-        threading.Thread(target=_tarea, daemon=True).start()
-
-    def _eliminar_torneo(self, e):
-        def _tarea():
-            self.loading_torneos_admin.visible = True
-            self.page.update()
-            self._bloquear_ui_torneos(True)
-            try:
-                if not self.edicion_seleccionada_id:
-                    GestorMensajes.mostrar(self.page, "Atención", "Seleccione un torneo para eliminar.", "error")
-                    self.loading_torneos_admin.visible = False
-                    self.page.update()
-                    return
-
-                bd = BaseDeDatos()
-                bd.eliminar_torneo(self.edicion_seleccionada_id)
-                GestorMensajes.mostrar(self.page, "Éxito", "Torneo eliminado.", "exito")
-                self._limpiar_formulario_torneo()
-                
-                self._recargar_datos(actualizar_torneos=True, actualizar_partidos=False)
-                
-            except Exception as ex:
-                GestorMensajes.mostrar(self.page, "Error", str(ex), "error")
-                self.loading_torneos_admin.visible = False
-                self.page.update()
-            finally:
-                self._bloquear_ui_torneos(False)
-        
-        threading.Thread(target=_tarea, daemon=True).start()
-
-    def _agregar_partido(self, e):
-        def _tarea_agregar_partido():
-            self.loading_admin.visible = True
-            self.loading_partidos.visible = True 
-            self.page.update()
-            
-            self._bloquear_ui_partidos(True) 
-            
-            try:
-                if not self.edicion_seleccionada_id:
-                    GestorMensajes.mostrar(self.page, "Atención", "Debe seleccionar un Torneo.", "error")
-                    self.loading_admin.visible = False 
-                    self.loading_partidos.visible = False
-                    self.page.update()
-                    return
-
-                rival = self.input_rival.value.strip()
-                fecha = self.date_picker.value 
-                hora = self.time_picker.value  
-                goles_cai_str = self.input_goles_cai.value.strip()
-                goles_rival_str = self.input_goles_rival.value.strip()
-
-                if not rival:
-                    GestorMensajes.mostrar(self.page, "Atención", "Debe ingresar el nombre del rival.", "error")
-                    self.loading_admin.visible = False
-                    self.loading_partidos.visible = False
-                    self.page.update()
-                    return
-                
-                if not fecha:
-                    GestorMensajes.mostrar(self.page, "Atención", "Debe seleccionar la fecha del partido.", "error")
-                    self.loading_admin.visible = False
-                    self.loading_partidos.visible = False
-                    self.page.update()
-                    return
-
-                if hora and self.txt_hora_display.value != "---":
-                    hora_final = hora
-                else:
-                    hora_final = datetime.min.time()
-
-                fecha_hora_partido = datetime.combine(fecha, hora_final)
-                ahora = datetime.now()
-                
-                bd = BaseDeDatos()
-
-                if bd.existe_partido_fecha(fecha.date()):
-                    GestorMensajes.mostrar(self.page, "Error", "Ya existe un partido registrado en esa fecha.", "error")
-                    self.loading_admin.visible = False
-                    self.loading_partidos.visible = False
-                    self.page.update()
-                    return
-
-                goles_cai = None
-                goles_rival = None
-
-                if fecha_hora_partido < ahora:
-                    if not goles_cai_str or not goles_rival_str:
-                        GestorMensajes.mostrar(self.page, "Faltan Resultados", "Obligatorio ingresar goles para partidos pasados.", "error")
-                        self.loading_admin.visible = False
-                        self.loading_partidos.visible = False
-                        self.page.update()
-                        return
-                    try:
-                        goles_cai = int(goles_cai_str)
-                        goles_rival = int(goles_rival_str)
-                    except ValueError:
-                        GestorMensajes.mostrar(self.page, "Error", "Los goles deben ser números enteros.", "error")
-                        self.loading_admin.visible = False
-                        self.loading_partidos.visible = False
-                        self.page.update()
-                        return
-                else:
-                    if goles_cai_str and goles_rival_str:
-                        try:
-                            goles_cai = int(goles_cai_str)
-                            goles_rival = int(goles_rival_str)
-                        except ValueError:
-                            GestorMensajes.mostrar(self.page, "Error", "Los goles deben ser números enteros.", "error")
-                            self.loading_admin.visible = False
-                            self.loading_partidos.visible = False
-                            self.page.update()
-                            return
-                    elif goles_cai_str or goles_rival_str:
-                        GestorMensajes.mostrar(self.page, "Error", "Si ingresa goles, complete ambos campos.", "error")
-                        self.loading_admin.visible = False
-                        self.loading_partidos.visible = False
-                        self.page.update()
-                        return
-
-                bd.insertar_partido(rival, fecha_hora_partido, goles_cai, goles_rival, edicion_id=self.edicion_seleccionada_id)
-                GestorMensajes.mostrar(self.page, "Éxito", "Partido agregado correctamente.", "exito")
-                self._limpiar_formulario_partido()
-                
-                # RECARGA: Actualiza ambas tablas
-                self._recargar_datos(actualizar_partidos=True, actualizar_admin=True)
-
-            except Exception as ex:
-                GestorMensajes.mostrar(self.page, "Error", f"Ocurrió un error al guardar: {ex}", "error")
-                self.loading_admin.visible = False
-                self.loading_partidos.visible = False
-                self.page.update()
-            finally:
-                self._bloquear_ui_partidos(False) 
-
-        threading.Thread(target=_tarea_agregar_partido, daemon=True).start()
-
-    def _editar_partido(self, e):
-        def _tarea():
-            self.loading_admin.visible = True
-            self.loading_partidos.visible = True 
-            self.page.update()
-            
-            self._bloquear_ui_partidos(True)
-            try:
-                if not self.partido_seleccionado_id:
-                    GestorMensajes.mostrar(self.page, "Atención", "Seleccione un partido para editar.", "error")
-                    self.loading_admin.visible = False
-                    self.loading_partidos.visible = False
-                    self.page.update()
-                    return
-                
-                if not self.edicion_seleccionada_id:
-                    GestorMensajes.mostrar(self.page, "Atención", "Seleccione el Torneo correspondiente.", "error")
-                    self.loading_admin.visible = False
-                    self.loading_partidos.visible = False
-                    self.page.update()
-                    return
-
-                rival = self.input_rival.value.strip()
-                fecha = self.date_picker.value
-                hora = self.time_picker.value
-                gc_str = self.input_goles_cai.value.strip()
-                gr_str = self.input_goles_rival.value.strip()
-
-                if not rival or not fecha:
-                    GestorMensajes.mostrar(self.page, "Error", "Complete rival y fecha.", "error")
-                    self.loading_admin.visible = False
-                    self.loading_partidos.visible = False
-                    self.page.update()
-                    return
-
-                if hora and self.txt_hora_display.value != "---":
-                    hora_final = hora
-                else:
-                    hora_final = datetime.min.time()
-
-                fecha_hora = datetime.combine(fecha, hora_final)
-                
-                gc = int(gc_str) if gc_str else None
-                gr = int(gr_str) if gr_str else None
-
-                bd = BaseDeDatos()
-                bd.editar_partido(self.partido_seleccionado_id, rival, fecha_hora, gc, gr, self.edicion_seleccionada_id)
-                
-                bd.eliminar_rivales_huerfanos()
-                
-                GestorMensajes.mostrar(self.page, "Éxito", "Partido modificado.", "exito")
-                self._limpiar_formulario_partido()
-                
-                # CORRECCIÓN: Como admin tocó un partido, actualizamos TODO, incluyendo Ranking.
-                self._recargar_datos(actualizar_partidos=True, actualizar_admin=True, actualizar_ranking=True)
-            except Exception as ex:
-                GestorMensajes.mostrar(self.page, "Error", str(ex), "error")
-                self.loading_admin.visible = False
-                self.loading_partidos.visible = False
-                self.page.update()
-            finally:
-                self._bloquear_ui_partidos(False)
-
-        threading.Thread(target=_tarea, daemon=True).start()
-
-    def _eliminar_partido(self, e):
-        def _tarea():
-            self.loading_admin.visible = True
-            self.loading_partidos.visible = True 
-            self.page.update()
-            
-            self._bloquear_ui_partidos(True)
-            try:
-                if not self.partido_seleccionado_id:
-                    GestorMensajes.mostrar(self.page, "Atención", "Seleccione un partido para eliminar.", "error")
-                    self.loading_admin.visible = False
-                    self.loading_partidos.visible = False
-                    self.page.update()
-                    return
-
-                bd = BaseDeDatos()
-                bd.eliminar_partido(self.partido_seleccionado_id)
-                
-                bd.eliminar_rivales_huerfanos()
-                
-                GestorMensajes.mostrar(self.page, "Éxito", "Partido eliminado.", "exito")
-                self._limpiar_formulario_partido()
-                
-                # RECARGA: Actualiza ambas tablas
-                self._recargar_datos(actualizar_partidos=True, actualizar_admin=True)
-            except Exception as ex:
-                GestorMensajes.mostrar(self.page, "Error", str(ex), "error")
-                self.loading_admin.visible = False
-                self.loading_partidos.visible = False
-                self.page.update()
-            finally:
-                self._bloquear_ui_partidos(False)
-
-        threading.Thread(target=_tarea, daemon=True).start()
-
-    def _fecha_cambiada(self, e):
-        """Actualiza el texto con la fecha seleccionada y valida goles"""
-        if self.date_picker.value:
-            self.txt_fecha_display.value = self.date_picker.value.strftime("%d/%m/%Y")
-            self._actualizar_estado_goles() # <--- NUEVA LLAMADA
-            self.page.update()
-
-    def _hora_cambiada(self, e):
-        """Actualiza el texto con la hora seleccionada y valida goles"""
-        if self.time_picker.value:
-            self.txt_hora_display.value = self.time_picker.value.strftime("%H:%M")
-            self._actualizar_estado_goles() # <--- NUEVA LLAMADA
-            self.page.update()
-
-    def _seleccionar_torneo(self, e):
-        if self.cargando_torneos or self.procesando_torneos:
-            GestorMensajes.mostrar(self.page, "Espere", "Actualizando lista de torneos...", "info")
-            return
-
-        fila_cliqueada = e.control
-        datos_fila = fila_cliqueada.data # dict {'id':..., 'finalizado':...}
-        
-        for fila in self.tabla_torneos.rows:
-            if fila == fila_cliqueada:
-                fila.selected = True
-                fila.color = ft.Colors.with_opacity(0.5, Estilos.COLOR_ROJO_CAI)
-                self.fila_seleccionada_ref = fila 
-                self.edicion_seleccionada_id = datos_fila['id']
-            else:
-                fila.selected = False
-                fila.color = None
-
-        # CORRECCIÓN: Agregamos un .content extra porque ahora el Texto está dentro de un Container
-        nombre_torneo = fila_cliqueada.cells[0].content.content.value 
-        anio_torneo = fila_cliqueada.cells[1].content.content.value # <--- CAMBIO AQUÍ
-        estado_finalizado = datos_fila['finalizado']
-
-        self.input_torneo_nombre.value = nombre_torneo
-        self.dd_torneo_anio.value = str(anio_torneo)
-        self.chk_torneo_finalizado.value = bool(estado_finalizado)
-        
-        self.txt_instruccion.visible = False
-        
-        self.page.update()
-
-    def _seleccionar_partido(self, e):
-        # 1. Validación de Bloqueo
-        if self.cargando_partidos or self.procesando_partidos:
-            GestorMensajes.mostrar(self.page, "Espere", "Actualizando lista de partidos...", "info")
-            return
-
-        fila_cliqueada = e.control
-        
-        datos_partido = fila_cliqueada.data
-        edicion_id_objetivo = datos_partido['edicion_id']
-
-        # 2. Selección Iterativa TABLA PARTIDOS
-        for fila in self.tabla_partidos_admin.rows:
-            if fila == fila_cliqueada:
-                fila.selected = True
-                fila.color = ft.Colors.with_opacity(0.5, Estilos.COLOR_ROJO_CAI)
-                self.fila_partido_ref = fila
-                self.partido_seleccionado_id = datos_partido['id']
-                
-                # Cargar formulario Partido
-                self.input_rival.value = datos_partido['rival']
-                if datos_partido['fecha']:
-                    self.date_picker.value = datos_partido['fecha']
-                    self.time_picker.value = datos_partido['fecha'].time()
-                    self.txt_fecha_display.value = datos_partido['fecha'].strftime("%d/%m/%Y")
-                    self.txt_hora_display.value = datos_partido['fecha'].strftime("%H:%M")
-                
-                self.input_goles_cai.value = str(datos_partido['goles_cai']) if datos_partido['goles_cai'] is not None else ""
-                self.input_goles_rival.value = str(datos_partido['goles_rival']) if datos_partido['goles_rival'] is not None else ""
-                
-            else:
-                fila.selected = False
-                fila.color = None
-
-        # 3. Selección Automática TABLA TORNEOS (Sincronización)
-        for fila_torneo in self.tabla_torneos.rows:
-            if fila_torneo.data == edicion_id_objetivo:
-                fila_torneo.selected = True
-                fila_torneo.color = ft.Colors.with_opacity(0.5, Estilos.COLOR_ROJO_CAI)
-                self.fila_seleccionada_ref = fila_torneo
-                self.edicion_seleccionada_id = edicion_id_objetivo
-                
-                nombre_torneo = fila_torneo.cells[0].content.content.value 
-                anio_torneo = fila_torneo.cells[1].content.value
-                self.input_torneo_nombre.value = nombre_torneo
-                self.dd_torneo_anio.value = str(anio_torneo)
-            else:
-                fila_torneo.selected = False
-                fila_torneo.color = None
-
-        # --- LÓGICA ETIQUETA ---
-        # Si seleccionamos partido -> se auto-seleccionó torneo -> etiqueta oculta
-        self.txt_instruccion.visible = False
-        
-        self._actualizar_estado_goles()
-        self.page.update()
-
-    def _cargar_datos_async(self):
-        # Activamos bandera de carga antes de iniciar el hilo
-        self.cargando_datos = True 
-        
-        def _tarea_en_segundo_plano():
-            time.sleep(0.5) 
-            
-            # Limpiamos referencias
-            self.fila_seleccionada_ref = None
-            self.edicion_seleccionada_id = None
-            self.fila_partido_ref = None
-            self.partido_seleccionado_id = None
-
-            try:
-                bd = BaseDeDatos()
-                if not self.editando_torneo:
-                    datos_ranking = bd.obtener_ranking()
-                datos_partidos = bd.obtener_partidos()
-                datos_ediciones = bd.obtener_ediciones()
-
-                # --- PROCESAR DATOS (CÓDIGO IGUAL AL ANTERIOR) ---
-                filas_tabla_ranking = []
-                for i, fila in enumerate(datos_ranking, start=1):
-                    filas_tabla_ranking.append(ft.DataRow(cells=[ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")), ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=80, alignment=ft.alignment.center_left)), ft.DataCell(ft.Text(str(fila[1]), weight=ft.FontWeight.BOLD, color="yellow", size=16)), ft.DataCell(ft.Text(str(fila[2]), color="white70")), ft.DataCell(ft.Text(str(fila[3]), color="white70")), ft.DataCell(ft.Text(str(fila[4]), color="white70"))]))
-
-                filas_tabla_partidos = []
-                filas_tabla_admin = [] 
-                for fila in datos_partidos:
-                    p_id = fila[0]
-                    rival = fila[1]
-                    fecha_obj = fila[2]
-                    torneo = fila[3]
-                    gc = fila[4]
-                    gr = fila[5]
-                    ed_id = fila[6]
-                    fecha_str = fecha_obj.strftime("%d/%m/%Y %H:%M") if fecha_obj else "Sin fecha"
-
-                    filas_tabla_partidos.append(ft.DataRow(cells=[ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=100, alignment=ft.alignment.center_left)), ft.DataCell(ft.Text(fecha_str, color="white70")), ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left))]))
-                    
-                    filas_tabla_admin.append(
-                        ft.DataRow(
-                            cells=[ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=100, alignment=ft.alignment.center_left)), ft.DataCell(ft.Text(fecha_str, color="white70")), ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left))],
-                            data={'id': p_id, 'rival': rival, 'fecha': fecha_obj, 'goles_cai': gc, 'goles_rival': gr, 'edicion_id': ed_id},
-                            on_select_changed=self._seleccionar_partido,
-                            selected=False
-                        )
-                    )
-
-                filas_torneos = []
-                for ed in datos_ediciones:
-                    ed_id = ed[0]
-                    nombre = ed[1]
-                    anio = ed[2]
-                    filas_torneos.append(ft.DataRow(cells=[ft.DataCell(ft.Container(content=ft.Text(str(nombre), color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataCell(ft.Text(str(anio), color="yellow", weight=ft.FontWeight.BOLD))], data=ed_id, on_select_changed=self._seleccionar_torneo, selected=False))
-
-                self.tabla_estadisticas.rows = filas_tabla_ranking
-                self.tabla_partidos.rows = filas_tabla_partidos
-                self.tabla_partidos_admin.rows = filas_tabla_admin
-                self.tabla_torneos.rows = filas_torneos
-                
-            except Exception as e:
-                print(f"Error: {e}")
-            
-            finally:
-                self.loading.visible = False
-                self.cargando_datos = False # LIBERAMOS LA BANDERA
-                self.page.update()
-
-        threading.Thread(target=_tarea_en_segundo_plano, daemon=True).start()
 
     def _cerrar_sesion(self, e):
         self.page.controls.clear()
