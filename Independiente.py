@@ -24,11 +24,11 @@ class SistemaIndependiente:
 
     def _sincronizar_fixture_api(self):
         """
-        Consulta la API de FotMob con estrategia de 'barrido completo'.
-        Busca en 'results', 'fixtures' y 'allFixtures' para asegurar 
-        al menos 5 partidos pasados y 5 futuros, unificando por ID.
+        Sincronización Inteligente:
+        1. Pasado: Actualiza resultados SOLO si faltan (no agrega partidos viejos).
+        2. Futuro: Toma los próximos 5. Si existen actualiza fecha, si no, los crea.
         """
-        print("Iniciando sincronización con FotMob (Modo Completo)...")
+        print("Iniciando sincronización (Lógica Estricta)...")
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -51,35 +51,27 @@ class SistemaIndependiente:
 
             data = response.json()
             fixtures_obj = data.get("fixtures", {})
-            
             partidos_unicos = {}
 
+            # Recolección de datos (igual que antes)
             def agregar_partidos(lista_origen):
                 if not lista_origen: return
                 for m in lista_origen:
                     if isinstance(m, dict):
                         m_id = m.get("id")
-                        if m_id:
-                            partidos_unicos[m_id] = m
+                        if m_id: partidos_unicos[m_id] = m
 
             agregar_partidos(fixtures_obj.get("results", []))
             agregar_partidos(fixtures_obj.get("fixtures", []))
-            
             raw_all = fixtures_obj.get("allFixtures")
-            if isinstance(raw_all, list):
-                agregar_partidos(raw_all)
+            if isinstance(raw_all, list): agregar_partidos(raw_all)
             elif isinstance(raw_all, dict):
-                if "fixtures" in raw_all and isinstance(raw_all["fixtures"], list):
-                    agregar_partidos(raw_all["fixtures"])
-                else:
-                    for val in raw_all.values():
-                        if isinstance(val, list):
-                            agregar_partidos(val)
+                for val in raw_all.values():
+                    if isinstance(val, list): agregar_partidos(val)
 
-            if not partidos_unicos:
-                print("La API respondió pero no se encontraron partidos válidos.")
-                return
+            if not partidos_unicos: return
 
+            # Clasificación
             jugados = []
             por_jugar = []
             
@@ -98,17 +90,26 @@ class SistemaIndependiente:
                 else:
                     por_jugar.append(datos)
             
-            jugados.sort(key=lambda x: x['fecha'], reverse=True)
-            por_jugar.sort(key=lambda x: x['fecha'], reverse=False)
+            # Ordenamiento
+            jugados.sort(key=lambda x: x['fecha'], reverse=True) # Más recientes primero
+            por_jugar.sort(key=lambda x: x['fecha'], reverse=False) # Más cercanos primero
             
-            lote_final = jugados[:CANT_PARTIDOS_A_SINCRONIZAR] + por_jugar[:CANT_PARTIDOS_A_SINCRONIZAR]
+            # --- APLICACIÓN DE REGLAS DE NEGOCIO ---
             
-            if lote_final:
-                print(f"Enviando {len(lote_final)} partidos a la BD...")
-                bd.guardar_lote_partidos(lote_final)
-                print("Sincronización de BD completada.")
-            else:
-                print("No hay partidos procesables en el lote.")
+            # 1. PASADO: Enviamos TODOS los jugados recuperados.
+            # La BD se encargará de ignorar los que no existen y solo actualizar los NULL.
+            if jugados:
+                print(f"Procesando {len(jugados)} partidos jugados...")
+                bd.actualizar_resultados_pendientes(jugados)
+
+            # 2. FUTURO: Tomamos solo los próximos 5.
+            # La BD actualizará fecha si existen, o los creará si no.
+            proximos_5 = por_jugar[:CANT_PARTIDOS_A_SINCRONIZAR]
+            if proximos_5:
+                print(f"Sincronizando próximos {len(proximos_5)} partidos...")
+                bd.sincronizar_proximos_partidos(proximos_5)
+            
+            print("Sincronización completada.")
             
         except Exception as e:
             print(f"Error crítico sincronizando FotMob: {e}")
@@ -118,7 +119,6 @@ class SistemaIndependiente:
                 self.page.close(self.dlg_cargando_inicio)
             
             print("Cargando interfaz...")
-            # --- MODIFICADO: Se activa actualizar_admin=True para cargar la tabla de Equipos al inicio ---
             self._recargar_datos(
                 actualizar_partidos=True, 
                 actualizar_pronosticos=True, 
@@ -1223,49 +1223,6 @@ class SistemaIndependiente:
 
         threading.Thread(target=_tarea, daemon=True).start()
 
-    def _seleccionar_partido_para_pronostico(self, e):
-        """
-        Maneja la selección de un partido en la tabla para permitir pronosticar.
-        Guarda el ID y rellena los inputs si ya existe un pronóstico visual.
-        """
-        # Si el usuario deselecciona la fila (clickea la misma de nuevo)
-        if not e.control.selected:
-            self.partido_a_pronosticar_id = None
-            self.input_pred_cai.value = ""
-            self.input_pred_rival.value = ""
-            self.page.update()
-            return
-
-        # Si selecciona una fila nueva
-        self.partido_a_pronosticar_id = e.control.data
-        
-        # Truco visual: Desmarcar las otras filas para que parezca selección única
-        for row in self.tabla_partidos.rows:
-            if row != e.control:
-                row.selected = False
-        e.control.selected = True 
-        
-        # Intentar pre-llenar los inputs leyendo la celda de la tabla
-        # La columna 4 es "Tu pronóstico" y tiene formato "GOL a GOL" o "-"
-        try:
-            # Estructura: DataCell -> Container -> Text -> value
-            texto_celda = e.control.cells[4].content.content.value
-            
-            if " a " in texto_celda:
-                partes = texto_celda.split(" a ")
-                self.input_pred_cai.value = partes[0]
-                self.input_pred_rival.value = partes[1]
-            else:
-                # Si es "-" limpiamos
-                self.input_pred_cai.value = ""
-                self.input_pred_rival.value = ""
-        except Exception:
-            # Si falla la lectura visual, solo limpiamos
-            self.input_pred_cai.value = ""
-            self.input_pred_rival.value = ""
-            
-        self.page.update()
-
     def _guardar_pronostico(self, e):
         """Valida y guarda el pronóstico ingresado."""
         def _tarea():
@@ -1356,46 +1313,6 @@ class SistemaIndependiente:
         
         self.btn_ver_usuario.disabled = False
         self.btn_ver_usuario.update()
-
-    def _cambiar_filtro_pronosticos(self, nuevo_filtro):
-        """Gestiona el cambio de filtros en la pestaña Pronósticos"""
-        self.filtro_pronosticos = nuevo_filtro
-        
-        # Resetear filtros específicos si cambia la categoría principal
-        if nuevo_filtro != 'torneo':
-            self.filtro_pron_torneo_nombre = None
-        if nuevo_filtro != 'equipo':
-            self.filtro_pron_rival_nombre = None
-        if nuevo_filtro != 'usuario':
-            self.filtro_pron_usuario = None
-            
-        # Actualizar títulos
-        if nuevo_filtro == 'todos':
-            self.txt_titulo_pronosticos.value = "Todos los pronósticos"
-        elif nuevo_filtro == 'futuros':
-            self.txt_titulo_pronosticos.value = "Pronósticos por jugar"
-        elif nuevo_filtro == 'jugados':
-            self.txt_titulo_pronosticos.value = "Pronósticos finalizados"
-        
-        self.txt_titulo_pronosticos.update()
-        
-        # Actualizar colores botones
-        self.btn_pron_todos.bgcolor = "blue" if nuevo_filtro == 'todos' else "#333333"
-        self.btn_pron_por_jugar.bgcolor = "blue" if nuevo_filtro == 'futuros' else "#333333"
-        self.btn_pron_jugados.bgcolor = "blue" if nuevo_filtro == 'jugados' else "#333333"
-        self.btn_pron_por_torneo.bgcolor = "blue" if nuevo_filtro == 'torneo' else "#333333"
-        self.btn_pron_por_equipo.bgcolor = "blue" if nuevo_filtro == 'equipo' else "#333333"
-        self.btn_pron_por_usuario.bgcolor = "blue" if nuevo_filtro == 'usuario' else "#333333"
-        
-        self.btn_pron_todos.update()
-        self.btn_pron_por_jugar.update()
-        self.btn_pron_jugados.update()
-        self.btn_pron_por_torneo.update()
-        self.btn_pron_por_equipo.update()
-        self.btn_pron_por_usuario.update()
-        
-        # Recargar solo pronósticos
-        self._recargar_datos(actualizar_pronosticos=True)
 
     def _confirmar_filtro_torneo_pronosticos(self, e):
         """

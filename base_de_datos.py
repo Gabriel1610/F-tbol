@@ -154,101 +154,6 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    def guardar_lote_partidos(self, lista_partidos_procesados):
-        """
-        Procesa una lista de partidos en una sola transacción.
-        Busca rivales por 'nombre' U 'otro_nombre' para manejar nombres alternativos de la API.
-        """
-        conexion = None
-        cursor = None
-        cambios_realizados = False
-        
-        try:
-            conexion = self.abrir()
-            cursor = conexion.cursor()
-
-            for datos in lista_partidos_procesados:
-                rival_nombre_api = datos['rival'] # El nombre que viene de la API
-                torneo_nombre = datos['torneo']
-                anio_numero = datos['anio']
-                fecha_hora = datos['fecha']
-                goles_cai = datos['goles_cai']
-                goles_rival = datos['goles_rival']
-
-                # --- 1. LÓGICA DE BÚSQUEDA DE RIVAL ---
-                # Buscamos si existe coincidencia en 'nombre' (oficial) O en 'otro_nombre' (alias API)
-                sql_buscar_rival = "SELECT id FROM rivales WHERE nombre = %s OR otro_nombre = %s LIMIT 1"
-                cursor.execute(sql_buscar_rival, (rival_nombre_api, rival_nombre_api))
-                res_rival = cursor.fetchone()
-                
-                if res_rival:
-                    # Si existe (ya sea por nombre o por otro_nombre), usamos su ID
-                    rival_id = res_rival[0]
-                else:
-                    # Si no existe en ninguno, lo creamos.
-                    # Se guarda el nombre de la API en el campo 'nombre' por defecto.
-                    # Si luego quieres cambiarlo en la BD, mueves este valor a 'otro_nombre' y pones el bonito en 'nombre'.
-                    cursor.execute("INSERT INTO rivales (nombre) VALUES (%s)", (rival_nombre_api,))
-                    rival_id = cursor.lastrowid
-
-                # 2. AÑO 
-                # Manejo de temporadas tipo '2024-2025' -> '2024'
-                if isinstance(anio_numero, str) and "-" in anio_numero:
-                    anio_numero = anio_numero.split("-")[0]
-                
-                cursor.execute("SELECT id FROM anios WHERE numero = %s", (anio_numero,))
-                res_anio = cursor.fetchone()
-                if res_anio:
-                    anio_id = res_anio[0]
-                else:
-                    cursor.execute("INSERT INTO anios (numero) VALUES (%s)", (anio_numero,))
-                    anio_id = cursor.lastrowid
-
-                # 3. CAMPEONATO
-                cursor.execute("SELECT id FROM campeonatos WHERE nombre = %s", (torneo_nombre,))
-                res_camp = cursor.fetchone()
-                if res_camp:
-                    camp_id = res_camp[0]
-                else:
-                    cursor.execute("INSERT INTO campeonatos (nombre) VALUES (%s)", (torneo_nombre,))
-                    camp_id = cursor.lastrowid
-
-                # 4. EDICIÓN
-                cursor.execute("SELECT id FROM ediciones WHERE campeonato_id = %s AND anio_id = %s", (camp_id, anio_id))
-                res_edicion = cursor.fetchone()
-                if res_edicion:
-                    edicion_id = res_edicion[0]
-                else:
-                    cursor.execute("INSERT INTO ediciones (campeonato_id, anio_id, finalizado) VALUES (%s, %s, FALSE)", (camp_id, anio_id))
-                    edicion_id = cursor.lastrowid
-
-                # 5. PARTIDO (Insertar o Actualizar usando el ID de rival encontrado)
-                cursor.execute("SELECT id FROM partidos WHERE rival_id = %s AND edicion_id = %s", (rival_id, edicion_id))
-                res_partido = cursor.fetchone()
-
-                if res_partido:
-                    partido_id = res_partido[0]
-                    # Solo actualizamos si vienen goles (resultado final) o si cambió la fecha
-                    if goles_cai is not None:
-                        cursor.execute("UPDATE partidos SET fecha_hora = %s, goles_independiente = %s, goles_rival = %s WHERE id = %s", (fecha_hora, goles_cai, goles_rival, partido_id))
-                        if cursor.rowcount > 0: cambios_realizados = True
-                    else:
-                        cursor.execute("UPDATE partidos SET fecha_hora = %s WHERE id = %s", (fecha_hora, partido_id))
-                else:
-                    cursor.execute("INSERT INTO partidos (rival_id, fecha_hora, goles_independiente, goles_rival, edicion_id) VALUES (%s, %s, %s, %s, %s)", (rival_id, fecha_hora, goles_cai, goles_rival, edicion_id))
-                    cambios_realizados = True
-
-            conexion.commit()
-            return cambios_realizados
-
-        except Exception as e:
-            # logger.error(f"Error BD Lote: {e}") # Descomentar si usas logger
-            print(f"Error BD Lote: {e}")
-            return False
-        finally:
-            if cursor: cursor.close()
-            if conexion: conexion.close()
-
     def obtener_rivales(self):
         """
         Obtiene la lista de todos los rivales (ID, Nombre) ordenados alfabéticamente.
@@ -306,6 +211,137 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
     
+    def actualizar_resultados_pendientes(self, lista_jugados):
+        """
+        Regla Pasado: Solo actualiza resultados si el partido YA existe en la BD
+        y tiene los goles en NULL. NO crea partidos nuevos ni rivales nuevos.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            count = 0
+            for datos in lista_jugados:
+                # 1. Buscamos el Rival (Solo lectura, no creamos si no existe)
+                cursor.execute("SELECT id FROM rivales WHERE nombre = %s OR otro_nombre = %s LIMIT 1", (datos['rival'], datos['rival']))
+                res_rival = cursor.fetchone()
+                if not res_rival: continue # Si no conocemos al rival, el partido no existe en nuestra BD. Saltamos.
+                rival_id = res_rival[0]
+
+                # 2. Buscamos la Edición (Solo lectura)
+                cursor.execute("SELECT id FROM campeonatos WHERE nombre = %s", (datos['torneo'],))
+                res_camp = cursor.fetchone()
+                if not res_camp: continue
+                
+                # Manejo simple de año string
+                anio_str = str(datos['anio']).split("-")[0]
+                cursor.execute("SELECT id FROM anios WHERE numero = %s", (anio_str,))
+                res_anio = cursor.fetchone()
+                if not res_anio: continue
+
+                cursor.execute("SELECT id FROM ediciones WHERE campeonato_id = %s AND anio_id = %s", (res_camp[0], res_anio[0]))
+                res_edicion = cursor.fetchone()
+                if not res_edicion: continue
+                edicion_id = res_edicion[0]
+
+                # 3. Intentamos ACTUALIZAR solo si los goles están vacíos (NULL)
+                # La fecha también se actualiza por si hubo corrección horaria post-partido
+                if datos['goles_cai'] is not None:
+                    sql = """
+                        UPDATE partidos 
+                        SET goles_independiente = %s, goles_rival = %s, fecha_hora = %s
+                        WHERE rival_id = %s AND edicion_id = %s AND goles_independiente IS NULL
+                    """
+                    cursor.execute(sql, (datos['goles_cai'], datos['goles_rival'], datos['fecha'], rival_id, edicion_id))
+                    if cursor.rowcount > 0:
+                        count += 1
+
+            conexion.commit()
+            return count > 0
+
+        except Exception as e:
+            logger.error(f"Error actualizando pendientes: {e}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def sincronizar_proximos_partidos(self, lista_futuros):
+        """
+        Regla Futuro (Próximos 5):
+        - Si existe: Actualiza fecha y hora.
+        - Si no existe: Lo agrega (creando rival/torneo si hace falta).
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            cambios = False
+            for datos in lista_futuros:
+                rival_nombre = datos['rival']
+                torneo_nombre = datos['torneo']
+                anio_numero = str(datos['anio']).split("-")[0]
+                fecha_hora = datos['fecha']
+
+                # --- A. GESTIÓN DE RIVAL (Buscar o Crear) ---
+                cursor.execute("SELECT id FROM rivales WHERE nombre = %s OR otro_nombre = %s LIMIT 1", (rival_nombre, rival_nombre))
+                res_rival = cursor.fetchone()
+                if res_rival:
+                    rival_id = res_rival[0]
+                else:
+                    cursor.execute("INSERT INTO rivales (nombre) VALUES (%s)", (rival_nombre,))
+                    rival_id = cursor.lastrowid
+
+                # --- B. GESTIÓN DE TORNEO/AÑO (Buscar o Crear) ---
+                cursor.execute("SELECT id FROM campeonatos WHERE nombre = %s", (torneo_nombre,))
+                res_camp = cursor.fetchone()
+                if res_camp: camp_id = res_camp[0]
+                else:
+                    cursor.execute("INSERT INTO campeonatos (nombre) VALUES (%s)", (torneo_nombre,))
+                    camp_id = cursor.lastrowid
+
+                cursor.execute("SELECT id FROM anios WHERE numero = %s", (anio_numero,))
+                res_anio = cursor.fetchone()
+                if res_anio: anio_id = res_anio[0]
+                else:
+                    cursor.execute("INSERT INTO anios (numero) VALUES (%s)", (anio_numero,))
+                    anio_id = cursor.lastrowid
+
+                cursor.execute("SELECT id FROM ediciones WHERE campeonato_id = %s AND anio_id = %s", (camp_id, anio_id))
+                res_ed = cursor.fetchone()
+                if res_ed: edicion_id = res_ed[0]
+                else:
+                    cursor.execute("INSERT INTO ediciones (campeonato_id, anio_id, finalizado) VALUES (%s, %s, FALSE)", (camp_id, anio_id))
+                    edicion_id = cursor.lastrowid
+
+                # --- C. GESTIÓN DEL PARTIDO (Upsert Lógico) ---
+                cursor.execute("SELECT id FROM partidos WHERE rival_id = %s AND edicion_id = %s", (rival_id, edicion_id))
+                res_partido = cursor.fetchone()
+
+                if res_partido:
+                    # SI EXISTE: Solo actualizamos la fecha/hora
+                    partido_id = res_partido[0]
+                    cursor.execute("UPDATE partidos SET fecha_hora = %s WHERE id = %s", (fecha_hora, partido_id))
+                    if cursor.rowcount > 0: cambios = True
+                else:
+                    # SI NO EXISTE: Lo insertamos (Goles en NULL por defecto)
+                    cursor.execute("INSERT INTO partidos (rival_id, edicion_id, fecha_hora) VALUES (%s, %s, %s)", (rival_id, edicion_id, fecha_hora))
+                    cambios = True
+
+            conexion.commit()
+            return cambios
+
+        except Exception as e:
+            logger.error(f"Error sincronizando futuros: {e}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
     def obtener_partidos(self, usuario, filtro='todos', edicion_id=None, rival_id=None):
         """
         Obtiene la lista de partidos filtrada y ordenada.
@@ -400,29 +436,6 @@ class BaseDeDatos:
         except Exception as e:
             logger.error(f"Error obteniendo partidos: {e}")
             return []
-        finally:
-            if cursor: cursor.close()
-            if conexion: conexion.close()
-
-    def actualizar_goles_partido(self, partido_id, goles_cai, goles_rival):
-        """
-        Actualiza los goles de un partido específico usando su ID.
-        """
-        conexion = None
-        cursor = None
-        try:
-            conexion = self.abrir()
-            cursor = conexion.cursor()
-
-            sql = "UPDATE partidos SET goles_independiente = %s, goles_rival = %s WHERE id = %s"
-            cursor.execute(sql, (goles_cai, goles_rival, partido_id))
-            conexion.commit()
-            
-            return cursor.rowcount > 0 # Retorna True si hubo cambios
-
-        except Exception as e:
-            logger.error(f"Error actualizando goles API: {e}")
-            return False
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
