@@ -711,9 +711,13 @@ class BaseDeDatos:
 
     def obtener_torneos_ganados(self, anio=None):
         """
-        Calcula cuántos torneos ha ganado cada usuario.
-        - Solo cuenta torneos marcados como FINALIZADOS (e.finalizado = TRUE).
-        - Si anio is not None, solo cuenta los torneos finalizados de ese año.
+        Calcula cuántos torneos ha ganado cada usuario aplicando los 4 criterios de desempate:
+        1. Puntos (Mayor). 
+        2. Cantidad Partidos Pronosticados (Mayor). 
+        3. Anticipación Promedio (Mayor). 
+        4. Eficiencia / Promedio Intentos (Menor).
+        
+        Solo cuenta torneos finalizados (e.finalizado = TRUE).
         """
         conexion = None
         cursor = None
@@ -729,46 +733,77 @@ class BaseDeDatos:
                 params.append(anio)
 
             sql = f"""
-            WITH PuntosPorUsuarioEdicion AS (
+            WITH LatestPredictions AS (
+                -- CTE 1: Calcula Puntos, Cantidad de Partidos y Anticipación (usando el ÚLTIMO pronóstico)
                 SELECT 
-                    u.username,
+                    pr.usuario_id,
                     p.edicion_id,
                     SUM(
                         (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
-                    ) as total_puntos
-                FROM usuarios u
-                JOIN pronosticos pr ON u.id = pr.usuario_id
+                    ) as total_puntos,
+                    COUNT(p.id) as cant_partidos,
+                    AVG(TIMESTAMPDIFF(SECOND, pr.fecha_prediccion, p.fecha_hora)) as avg_anticipacion
+                FROM pronosticos pr
+                INNER JOIN (
+                    -- Filtro para obtener solo el último pronóstico por partido/usuario
+                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    GROUP BY usuario_id, partido_id
+                ) last_pr ON pr.usuario_id = last_pr.usuario_id 
+                         AND pr.partido_id = last_pr.partido_id 
+                         AND pr.fecha_prediccion = last_pr.max_fecha
                 JOIN partidos p ON pr.partido_id = p.id
                 JOIN ediciones e ON p.edicion_id = e.id
-                JOIN anios a ON e.anio_id = a.id  -- Join necesario para filtrar por año
+                JOIN anios a ON e.anio_id = a.id
                 WHERE p.goles_independiente IS NOT NULL 
                   AND e.finalizado = TRUE
-                  {filtro_anio} -- Inyección del filtro
-                GROUP BY u.username, p.edicion_id
+                  {filtro_anio}
+                GROUP BY pr.usuario_id, p.edicion_id
             ),
-            MaximosPorEdicion AS (
-                SELECT edicion_id, MAX(total_puntos) as max_pts
-                FROM PuntosPorUsuarioEdicion
-                GROUP BY edicion_id
+            TotalAttempts AS (
+                -- CTE 2: Calcula el total de intentos (historial) para el desempate de eficiencia
+                SELECT 
+                    pr.usuario_id,
+                    p.edicion_id,
+                    COUNT(*) as total_intentos
+                FROM pronosticos pr
+                JOIN partidos p ON pr.partido_id = p.id
+                JOIN ediciones e ON p.edicion_id = e.id
+                JOIN anios a ON e.anio_id = a.id
+                WHERE e.finalizado = TRUE
+                  {filtro_anio}
+                GROUP BY pr.usuario_id, p.edicion_id
             ),
-            GanadoresPorEdicion AS (
-                SELECT p.username, p.edicion_id
-                FROM PuntosPorUsuarioEdicion p
-                JOIN MaximosPorEdicion m ON p.edicion_id = m.edicion_id AND p.total_puntos = m.max_pts
-                WHERE m.max_pts > 0
+            RankedUsers AS (
+                -- CTE 3: Aplica el RANK() con los 4 criterios
+                SELECT 
+                    lp.usuario_id,
+                    lp.edicion_id,
+                    RANK() OVER (
+                        PARTITION BY lp.edicion_id 
+                        ORDER BY 
+                            lp.total_puntos DESC,           -- 1. Más Puntos
+                            lp.cant_partidos DESC,          -- 2. Más Partidos Jugados
+                            lp.avg_anticipacion DESC,       -- 3. Mayor Anticipación
+                            (COALESCE(ta.total_intentos, 0) / NULLIF(lp.cant_partidos, 0)) ASC -- 4. Menor Promedio Intentos
+                    ) as ranking
+                FROM LatestPredictions lp
+                JOIN TotalAttempts ta ON lp.usuario_id = ta.usuario_id AND lp.edicion_id = ta.edicion_id
             )
+            -- Consulta Final: Cuenta cuántas veces quedó 1º cada usuario
             SELECT 
                 u.username,
-                COUNT(g.edicion_id) as copas
+                COUNT(r.edicion_id) as copas
             FROM usuarios u
-            LEFT JOIN GanadoresPorEdicion g ON u.username = g.username
-            GROUP BY u.username
+            LEFT JOIN RankedUsers r ON u.id = r.usuario_id AND r.ranking = 1
+            GROUP BY u.id, u.username
             ORDER BY copas DESC, u.username ASC
             """
             
-            cursor.execute(sql, tuple(params))
+            # Duplicamos params porque filtro_anio se usa 2 veces (en LatestPredictions y TotalAttempts)
+            cursor.execute(sql, tuple(params * 2))
             return cursor.fetchall()
         except Exception as e:
             logger.error(f"Error obteniendo historial de campeones: {e}")
@@ -776,7 +811,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-
+            
     def obtener_usuarios(self):
         """Obtiene la lista de nombres de usuario registrados."""
         conexion = None
@@ -889,10 +924,55 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
+    def marcar_edicion_finalizada(self, nombre_torneo, numero_anio):
+        """
+        Marca una edición como finalizada (finalizado = TRUE) en la base de datos.
+        Se llama cuando la API detecta que ya no hay partidos futuros para este torneo.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            # 1. Buscar ID del Campeonato
+            cursor.execute("SELECT id FROM campeonatos WHERE nombre = %s", (nombre_torneo,))
+            res_camp = cursor.fetchone()
+            
+            # 2. Buscar ID del Año (Manejo de string/int)
+            anio_str = str(numero_anio).split("-")[0]
+            cursor.execute("SELECT id FROM anios WHERE numero = %s", (anio_str,))
+            res_anio = cursor.fetchone()
+
+            if res_camp and res_anio:
+                camp_id = res_camp[0]
+                anio_id = res_anio[0]
+                
+                # 3. Actualizar a FINALIZADO solo si aún no lo está
+                sql = """
+                    UPDATE ediciones 
+                    SET finalizado = TRUE 
+                    WHERE campeonato_id = %s AND anio_id = %s AND finalizado = FALSE
+                """
+                cursor.execute(sql, (camp_id, anio_id))
+                
+                if cursor.rowcount > 0:
+                    logger.info(f"Torneo marcado como FINALIZADO: {nombre_torneo} {anio_str}")
+                    return True
+            return False
+
+        except Exception as e:
+            logger.error(f"Error finalizando edición en BD: {e}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
     def obtener_ranking(self, edicion_id=None, anio=None):
         """
         Calcula el ranking con los nuevos criterios de desempate.
         CORRECCIÓN: Se duplican los parámetros porque el filtro SQL se inyecta 2 veces.
+        Retorna en la última columna el 'Promedio de Intentos' para mostrar en la tabla.
         """
         conexion = None
         cursor = None
@@ -926,8 +1006,7 @@ class BaseDeDatos:
                     WHERE goles_independiente IS NOT NULL
                 """
 
-            # 2. Obtener Total de Partidos Jugados en el contexto
-            # Aquí usamos params una sola vez (correcto para esta query)
+            # 2. Obtener Total de Partidos Jugados en el contexto (ya no es crítico para el promedio, pero se deja por seguridad)
             cursor.execute(f"SELECT COUNT(*) FROM ({sql_partidos_filtrados}) as t", tuple(params))
             total_partidos_contexto = cursor.fetchone()[0]
             if total_partidos_contexto == 0: total_partidos_contexto = 1
@@ -973,7 +1052,6 @@ class BaseDeDatos:
                     AND p1.fecha_prediccion = p2.max_fecha
             ) pr ON u.id = pr.usuario_id
             
-            -- Inyección 1 del filtro: Consume 1 set de params
             LEFT JOIN ({sql_partidos_filtrados}) p ON pr.partido_id = p.id
             
             -- Join para contar TODOS los intentos (para el desempate de eficiencia)
@@ -1000,12 +1078,19 @@ class BaseDeDatos:
             resultados_procesados = []
             for row in filas:
                 cant_pronosticos = row[5]
-                promedio_participacion = cant_pronosticos / total_partidos_contexto
+                total_intentos = row[7] # Obtenemos el total de intentos real
                 
-                # IMPORTANTE: Recortamos row[:7] para eliminar la columna auxiliar 'total_intentos_raw'
-                # y que la interfaz reciba exactamente lo que espera.
+                # Calculamos el Promedio de Intentos (Criterio #4)
+                if cant_pronosticos > 0:
+                    promedio_intentos = total_intentos / cant_pronosticos
+                else:
+                    promedio_intentos = 0
+                
+                # Armamos la fila final:
+                # 0-6: Datos estándar (incluye cant_pronosticos en idx 5)
+                # 7: Promedio Intentos (reemplaza al auxiliar total_intentos_raw)
                 lista_row = list(row[:7])
-                lista_row.append(promedio_participacion) # Índice 7 final
+                lista_row.append(promedio_intentos) 
                 resultados_procesados.append(lista_row)
                 
             return resultados_procesados
@@ -1016,7 +1101,6 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-
     def validar_usuario(self, username, password):
         conexion = None
         cursor = None

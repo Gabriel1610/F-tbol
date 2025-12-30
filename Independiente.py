@@ -25,8 +25,9 @@ class SistemaIndependiente:
     def _sincronizar_fixture_api(self):
         """
         Sincronización Inteligente:
-        1. Pasado: Actualiza resultados SOLO si faltan (no agrega partidos viejos).
-        2. Futuro: Toma los próximos 5. Si existen actualiza fecha, si no, los crea.
+        1. Pasado: Actualiza resultados SOLO si faltan.
+        2. Futuro: Sincroniza próximos partidos.
+        3. Finalización: Si un torneo tiene partidos jugados pero ya no tiene futuros, se marca como finalizado.
         """
         print("Iniciando sincronización (Lógica Estricta)...")
 
@@ -53,7 +54,7 @@ class SistemaIndependiente:
             fixtures_obj = data.get("fixtures", {})
             partidos_unicos = {}
 
-            # Recolección de datos (igual que antes)
+            # Recolección de datos
             def agregar_partidos(lista_origen):
                 if not lista_origen: return
                 for m in lista_origen:
@@ -91,24 +92,39 @@ class SistemaIndependiente:
                     por_jugar.append(datos)
             
             # Ordenamiento
-            jugados.sort(key=lambda x: x['fecha'], reverse=True) # Más recientes primero
-            por_jugar.sort(key=lambda x: x['fecha'], reverse=False) # Más cercanos primero
+            jugados.sort(key=lambda x: x['fecha'], reverse=True)
+            por_jugar.sort(key=lambda x: x['fecha'], reverse=False)
             
-            # --- APLICACIÓN DE REGLAS DE NEGOCIO ---
-            
-            # 1. PASADO: Enviamos TODOS los jugados recuperados.
-            # La BD se encargará de ignorar los que no existen y solo actualizar los NULL.
+            # --- 1. ACTUALIZACIÓN DE PARTIDOS ---
             if jugados:
                 print(f"Procesando {len(jugados)} partidos jugados...")
                 bd.actualizar_resultados_pendientes(jugados)
 
-            # 2. FUTURO: Tomamos solo los próximos 5.
-            # La BD actualizará fecha si existen, o los creará si no.
             proximos_5 = por_jugar[:CANT_PARTIDOS_A_SINCRONIZAR]
             if proximos_5:
                 print(f"Sincronizando próximos {len(proximos_5)} partidos...")
                 bd.sincronizar_proximos_partidos(proximos_5)
             
+            # --- 2. LÓGICA DE FINALIZACIÓN DE TORNEOS ---
+            # Identificamos qué torneos tienen partidos en el futuro
+            torneos_con_futuro = set()
+            for p in por_jugar:
+                torneos_con_futuro.add((p['torneo'], p['anio']))
+            
+            # Identificamos qué torneos tienen partidos en el pasado
+            torneos_con_pasado = set()
+            for p in jugados:
+                torneos_con_pasado.add((p['torneo'], p['anio']))
+            
+            # Si un torneo está en el pasado pero NO en el futuro, asumimos que terminó
+            posibles_finalizados = torneos_con_pasado - torneos_con_futuro
+            
+            if posibles_finalizados:
+                print(f"Verificando finalización de {len(posibles_finalizados)} torneos...")
+                for nombre, anio in posibles_finalizados:
+                    # Llamamos a la BD para marcarlo como TRUE si existe
+                    bd.marcar_edicion_finalizada(nombre, anio)
+
             print("Sincronización completada.")
             
         except Exception as e:
@@ -123,7 +139,7 @@ class SistemaIndependiente:
                 actualizar_partidos=True, 
                 actualizar_pronosticos=True, 
                 actualizar_ranking=True,
-                actualizar_copas=True,
+                actualizar_copas=True, # Recargar copas por si alguno finalizó recién
                 actualizar_admin=True 
             )
 
@@ -355,7 +371,8 @@ class SistemaIndependiente:
         )
 
         # --- CONTENEDOR 3: GRÁFICOS DE BARRA ---
-        self.btn_grafico_barras_puntos = ft.ElevatedButton("Puntos por partidos", icon=ft.Icons.BAR_CHART, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_barras)
+        # MODIFICACIÓN: Se aumentó el height a 45 para que se lea la "p" de "partidos"
+        self.btn_grafico_barras_puntos = ft.ElevatedButton("Puntos por partidos", icon=ft.Icons.BAR_CHART, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_barras)
 
         self.contenedor_graficos_barra = ft.Container(
             padding=ft.padding.all(10),
@@ -401,7 +418,7 @@ class SistemaIndependiente:
         self.btn_pron_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('equipo'))
         self.btn_pron_por_usuario = ft.ElevatedButton("Por usuario", icon=ft.Icons.PERSON, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('usuario'))
 
-        # --- DEFINICIÓN DE COLUMNAS ---
+        # --- DEFINICIÓN DE COLUMNAS (ENCABEZADOS CENTRADOS CON ANCHO FIJO) ---
         columnas_partidos = [
             ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), 
@@ -424,6 +441,7 @@ class SistemaIndependiente:
 
         ancho_usuario = 110 
         
+        # --- COLUMNAS ESTADÍSTICAS (MODIFICADO: NOMBRES DE COLUMNAS) ---
         columnas_estadisticas = [
             ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center)), 
@@ -431,8 +449,11 @@ class SistemaIndependiente:
             ft.DataColumn(ft.Container(content=ft.Text("Pts.\nGanador", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Pts.\nGoles CAI", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Pts.\nGoles Rival", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)),
-            ft.DataColumn(ft.Container(content=ft.Text("Tasa\nPart.", color="cyan", text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center)),
-            ft.DataColumn(ft.Container(content=ft.Text("Anticipación\nPromedio", color="cyan", text_align=ft.TextAlign.CENTER), width=200, alignment=ft.alignment.center))
+            # CAMBIO DE NOMBRE: "Part.\nJug." -> "Partidos\nJugados"
+            ft.DataColumn(ft.Container(content=ft.Text("Partidos\nJugados", color="cyan", text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Anticipación\nPromedio", color="cyan", text_align=ft.TextAlign.CENTER), width=200, alignment=ft.alignment.center)),
+            # CAMBIO DE NOMBRE: "Prom.\nIntentos" -> "Promedio\nIntentos"
+            ft.DataColumn(ft.Container(content=ft.Text("Promedio\nIntentos", color="cyan", text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center))
         ]
 
         columnas_copas = [
@@ -447,8 +468,8 @@ class SistemaIndependiente:
         ]
 
         # --- DEFINICIÓN DE TABLAS ---
-        self.tabla_estadisticas_header = ft.DataTable(width=1200, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=15, columns=columnas_estadisticas, rows=[])
-        self.tabla_estadisticas = ft.DataTable(width=1200, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
+        self.tabla_estadisticas_header = ft.DataTable(width=1250, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=15, columns=columnas_estadisticas, rows=[])
+        self.tabla_estadisticas = ft.DataTable(width=1250, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
         
         self.tabla_copas_header = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_copas, rows=[])
         self.tabla_copas = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_copas, rows=[])
@@ -695,6 +716,7 @@ class SistemaIndependiente:
                                 ft.Row(
                                     vertical_alignment=ft.CrossAxisAlignment.START,
                                     controls=[
+                                        # Tabla Izquierda
                                         ft.Column(
                                             spacing=0,
                                             controls=[
@@ -709,6 +731,7 @@ class SistemaIndependiente:
                                             ]
                                         ),
                                         ft.Container(width=20),
+                                        # Formulario Derecha
                                         ft.Card(
                                             content=ft.Container(
                                                 content=ft.Column([
@@ -742,7 +765,6 @@ class SistemaIndependiente:
         
         self.page.open(self.dlg_cargando_inicio)
         threading.Thread(target=self._sincronizar_fixture_api, daemon=True).start()
-
     def _procesar_partido_fotmob(self, match):
         """
         Extrae datos limpios de un objeto partido de FotMob con validaciones.
@@ -1595,9 +1617,15 @@ class SistemaIndependiente:
                     datos_ranking = bd.obtener_ranking(edicion_id=self.filtro_ranking_edicion_id, anio=self.filtro_ranking_anio)
                     filas_tabla_ranking = []
                     for i, fila in enumerate(datos_ranking, start=1):
-                        # Formatear Tasa
-                        tasa = fila[7]
-                        txt_tasa = f"{tasa:.2f}" 
+                        
+                        # Datos recuperados de la BD:
+                        # [0] User, [1] Total, [2] Gan, [3] CAI, [4] Riv, [5] Cant_Pron, [6] Anticip, [7] Prom_Intentos
+                        
+                        cant_partidos_jug = fila[5]
+                        promedio_intentos = fila[7]
+                        
+                        txt_partidos_jug = str(cant_partidos_jug)
+                        txt_promedio_intentos = f"{promedio_intentos:.2f}"
                         
                         # Formatear Anticipación
                         segundos = fila[6]
@@ -1606,7 +1634,7 @@ class SistemaIndependiente:
                         else:
                             seg = int(segundos)
                             if seg < 0: 
-                                txt_anticip = "-" # Por seguridad si el pronostico fue despues (raro)
+                                txt_anticip = "-" 
                             else:
                                 d = seg // 86400
                                 seg %= 86400
@@ -1623,8 +1651,11 @@ class SistemaIndependiente:
                             ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white70"), width=100, alignment=ft.alignment.center)), 
                             ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white70"), width=100, alignment=ft.alignment.center)), 
                             ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white70"), width=100, alignment=ft.alignment.center)),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_tasa, color="cyan"), width=80, alignment=ft.alignment.center)),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_anticip, color="cyan", size=12), width=200, alignment=ft.alignment.center))
+                            # NUEVA COLUMNA: Part. Jug.
+                            ft.DataCell(ft.Container(content=ft.Text(txt_partidos_jug, color="cyan"), width=80, alignment=ft.alignment.center)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_anticip, color="cyan", size=12), width=200, alignment=ft.alignment.center)),
+                            # COLUMNA AL FINAL: Prom. Intentos
+                            ft.DataCell(ft.Container(content=ft.Text(txt_promedio_intentos, color="cyan"), width=80, alignment=ft.alignment.center))
                         ]))
                     self.tabla_estadisticas.rows = filas_tabla_ranking
                     
@@ -1633,7 +1664,6 @@ class SistemaIndependiente:
                         datos_copas = bd.obtener_torneos_ganados(anio=anio_para_copas)
                         filas_copas = []
                         for i, fila in enumerate(datos_copas, start=1):
-                            # CORRECCIÓN AQUÍ: Usar exactamente los mismos anchos que el Header
                             filas_copas.append(ft.DataRow(cells=[
                                 ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center)),
                                 ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center)), 
@@ -1799,7 +1829,6 @@ class SistemaIndependiente:
                 self.page.update()
 
         threading.Thread(target=_tarea_en_segundo_plano, daemon=True).start()
-
     def _abrir_selector_torneo(self, e):
         """Abre el modal para filtrar la tabla de PARTIDOS por torneo."""
         # Reutilizamos el diseño de listas
