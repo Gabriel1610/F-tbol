@@ -10,6 +10,7 @@ from argon2.exceptions import VerifyMismatchError
 
 PUNTOS = 3
 MÁXIMA_CANTIDAD_DE_PUNTOS = 9
+MAYOR_ENTERO = 999999999
 
 # Configuración del Logger
 logging.basicConfig(level=logging.INFO)
@@ -442,13 +443,11 @@ class BaseDeDatos:
 
     def obtener_datos_evolucion_puestos(self, edicion_id, usuarios_seleccionados):
         """
-        Calcula la evolución del ranking partido a partido.
-        Maneja empates: Si varios usuarios tienen los mismos puntos, comparten el mejor puesto.
-        Ejemplo: Juan(50) -> 1º, José(45) -> 2º, Pedro(45) -> 2º.
-        Retorna: 
-            - cantidad_partidos (int)
-            - total_usuarios_sistema (int)
-            - historial (dict): {usuario: [puesto_fecha_1, puesto_fecha_2...]}
+        Calcula la evolución del ranking aplicando los nuevos criterios:
+        1. Puntos (Mayor).
+        2. Partidos Pronosticados (Mayor).
+        3. Anticipación (Mayor).
+        4. Promedio de intentos (Menor).
         """
         conexion = None
         cursor = None
@@ -456,11 +455,11 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            # 1. Contar total de usuarios para escalar el gráfico
+            # 1. Contar total de usuarios
             cursor.execute("SELECT COUNT(*) FROM usuarios")
             total_usuarios = cursor.fetchone()[0]
 
-            # 2. Obtener partidos JUGADOS de la edición ordenados por fecha
+            # 2. Obtener partidos JUGADOS ordenados por fecha
             sql_partidos = """
                 SELECT id 
                 FROM partidos 
@@ -473,58 +472,101 @@ class BaseDeDatos:
             if not partidos:
                 return 0, total_usuarios, {}
 
-            # 3. Obtener todos los usuarios
+            # 3. Obtener usuarios y estructuras
             cursor.execute("SELECT id, username FROM usuarios")
             usuarios_bd = cursor.fetchall()
             
-            puntos_acumulados = {u[0]: 0 for u in usuarios_bd} 
+            ids_usuarios = [u[0] for u in usuarios_bd]
             mapa_nombres = {u[0]: u[1] for u in usuarios_bd}
+            
+            # Acumuladores
+            puntos_acumulados = {uid: 0 for uid in ids_usuarios} 
+            suma_anticipacion = {uid: 0 for uid in ids_usuarios}
+            cant_partidos_jugados = {uid: 0 for uid in ids_usuarios} # Criterio 2
+            total_intentos_acumulados = {uid: 0 for uid in ids_usuarios} # Criterio 4
+            
             historial_grafico = {user: [] for user in usuarios_seleccionados}
 
             # 4. Iterar partido a partido
             for partido_id in partidos:
-                # Obtener puntos de ESTA fecha
-                sql_puntos = f"""
+                # Consulta para obtener: Puntos, Anticipación y Cantidad de Intentos en ESTE partido
+                sql_datos_partido = f"""
                     SELECT 
                         pr.usuario_id,
+                        -- Puntos (usando último pronóstico)
                         (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
-                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END) as puntos
+                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END) as puntos,
+                        -- Anticipación (usando último pronóstico)
+                        TIMESTAMPDIFF(SECOND, pr.fecha_prediccion, p.fecha_hora) as segundos_anticipacion,
+                        -- Conteo de intentos totales para este partido
+                        (SELECT COUNT(*) FROM pronosticos WHERE usuario_id = pr.usuario_id AND partido_id = %s) as intentos_match
                     FROM pronosticos pr
+                    JOIN (
+                        SELECT usuario_id, MAX(fecha_prediccion) as max_fecha
+                        FROM pronosticos
+                        WHERE partido_id = %s
+                        GROUP BY usuario_id
+                    ) last_pred ON pr.usuario_id = last_pred.usuario_id 
+                        AND pr.fecha_prediccion = last_pred.max_fecha
                     JOIN partidos p ON pr.partido_id = p.id
-                    WHERE p.id = %s
+                    WHERE p.id = %s AND pr.partido_id = %s
                 """
-                cursor.execute(sql_puntos, (partido_id,))
+                cursor.execute(sql_datos_partido, (partido_id, partido_id, partido_id, partido_id))
                 resultados = cursor.fetchall()
 
-                # Sumar al acumulado global
-                for uid, pts in resultados:
+                # Actualizar acumulados
+                for uid, pts, segs, intentos in resultados:
                     if uid in puntos_acumulados:
                         puntos_acumulados[uid] += pts
+                        val_sec = segs if segs is not None else 0
+                        suma_anticipacion[uid] += val_sec
+                        cant_partidos_jugados[uid] += 1
+                        total_intentos_acumulados[uid] += intentos
 
-                # --- CÁLCULO DE RANKING CON EMPATES ---
-                # Ordenar lista de (id, puntos) de mayor a menor
-                ranking_ordenado = sorted(puntos_acumulados.items(), key=lambda x: x[1], reverse=True)
+                # --- CÁLCULO DE RANKING DEL MOMENTO ---
+                def get_sort_key(uid):
+                    pts = puntos_acumulados[uid]
+                    partidos_jug = cant_partidos_jugados[uid]
+                    
+                    if partidos_jug > 0:
+                        # Promedio de anticipación
+                        avg_ant = suma_anticipacion[uid] / partidos_jug
+                        # Promedio de intentos (Queremos MENOR es mejor)
+                        # Usamos negativo para que al ordenar reverse=True (DESC), el valor -1.0 gane a -2.0
+                        avg_intentos = -(total_intentos_acumulados[uid] / partidos_jug)
+                    else:
+                        avg_ant = 0
+                        # Si no jugó, pierde en criterio 2, el 4 ya no importa tanto, ponemos algo neutro
+                        avg_intentos = 0
+
+                    # Tupla de Ordenamiento:
+                    # 1. Puntos (Max)
+                    # 2. Partidos Jugados (Max) -> "Más participó gana"
+                    # 3. Anticipación (Max)
+                    # 4. Promedio Intentos (Max Negativo -> Menor promedio real)
+                    return (pts, partidos_jug, avg_ant, avg_intentos)
+
+                # Ordenar
+                ranking_ordenado = sorted(ids_usuarios, key=get_sort_key, reverse=True)
                 
+                # Asignar puestos
                 mapa_puestos = {}
-                puntos_anteriores = -1
+                prev_key = None
                 puesto_actual = 0
                 
-                for i, (uid, pts) in enumerate(ranking_ordenado):
-                    # Si los puntos son distintos al anterior, el puesto es su posición real en la lista (índice + 1)
-                    if pts != puntos_anteriores:
+                for i, uid in enumerate(ranking_ordenado):
+                    current_key = get_sort_key(uid)
+                    if current_key != prev_key:
                         puesto_actual = i + 1
-                        puntos_anteriores = pts
-                    # Si los puntos son iguales, se mantiene el 'puesto_actual' (el mejor del grupo empatado)
-                    
+                        prev_key = current_key
                     mapa_puestos[uid] = puesto_actual
 
-                # Guardar el puesto calculado para los usuarios seleccionados
+                # Guardar en historial
                 for usuario_target in usuarios_seleccionados:
-                    # Buscar ID del nombre de usuario
                     target_id = next((k for k, v in mapa_nombres.items() if v == usuario_target), None)
                     if target_id:
-                        puesto = mapa_puestos.get(target_id)
+                        puesto = mapa_puestos.get(target_id, total_usuarios)
                         historial_grafico[usuario_target].append(puesto)
 
             return len(partidos), total_usuarios, historial_grafico
@@ -849,8 +891,8 @@ class BaseDeDatos:
 
     def obtener_ranking(self, edicion_id=None, anio=None):
         """
-        Calcula el ranking incluyendo estadísticas de participación y anticipación.
-        Retorna una lista extendida con la tasa de pronósticos y el tiempo promedio.
+        Calcula el ranking con los nuevos criterios de desempate.
+        CORRECCIÓN: Se duplican los parámetros porque el filtro SQL se inyecta 2 veces.
         """
         conexion = None
         cursor = None
@@ -884,17 +926,13 @@ class BaseDeDatos:
                     WHERE goles_independiente IS NOT NULL
                 """
 
-            # 2. Obtener Total de Partidos Jugados en el contexto (para el promedio)
+            # 2. Obtener Total de Partidos Jugados en el contexto
+            # Aquí usamos params una sola vez (correcto para esta query)
             cursor.execute(f"SELECT COUNT(*) FROM ({sql_partidos_filtrados}) as t", tuple(params))
             total_partidos_contexto = cursor.fetchone()[0]
-            
-            if total_partidos_contexto == 0:
-                total_partidos_contexto = 1 # Evitar división por cero
+            if total_partidos_contexto == 0: total_partidos_contexto = 1
 
             # 3. Query Principal
-            # Se agrega: p1.fecha_prediccion a la subquery de pronósticos
-            # Se agrega: COUNT(p.id) para contar pronósticos hechos sobre partidos jugados
-            # Se agrega: AVG(TIMESTAMPDIFF) para calcular anticipación promedio
             sql = f"""
             SELECT 
                 u.username,
@@ -911,14 +949,18 @@ class BaseDeDatos:
                 COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END), 0) AS pts_cai,
                 COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival,
 
-                -- [5] Cantidad de pronósticos hechos
+                -- [5] Cantidad de partidos distintos pronosticados (Participación)
                 COUNT(p.id) as cant_pronosticos,
                 
-                -- [6] Promedio de segundos de anticipación (Fecha Partido - Fecha Pronóstico)
-                AVG(TIMESTAMPDIFF(SECOND, pr.fecha_prediccion, p.fecha_hora)) as avg_anticipacion_segundos
+                -- [6] Promedio de anticipación
+                AVG(TIMESTAMPDIFF(SECOND, pr.fecha_prediccion, p.fecha_hora)) as avg_anticipacion_segundos,
+                
+                -- [7] Columna Auxiliar: Total de intentos (CORREGIDO con MAX)
+                COALESCE(MAX(att.total_intentos), 0) as total_intentos_raw
 
             FROM usuarios u
             
+            -- Join para obtener el ÚLTIMO pronóstico (para puntos y anticipación)
             LEFT JOIN (
                 SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival, p1.fecha_prediccion
                 FROM pronosticos p1
@@ -931,25 +973,39 @@ class BaseDeDatos:
                     AND p1.fecha_prediccion = p2.max_fecha
             ) pr ON u.id = pr.usuario_id
             
+            -- Inyección 1 del filtro: Consume 1 set de params
             LEFT JOIN ({sql_partidos_filtrados}) p ON pr.partido_id = p.id
             
+            -- Join para contar TODOS los intentos (para el desempate de eficiencia)
+            LEFT JOIN (
+                SELECT pr2.usuario_id, COUNT(*) as total_intentos
+                FROM pronosticos pr2
+                -- Inyección 2 del filtro: Consume otro set de params
+                JOIN ({sql_partidos_filtrados}) p_scope ON pr2.partido_id = p_scope.id
+                GROUP BY pr2.usuario_id
+            ) att ON u.id = att.usuario_id
+            
             GROUP BY u.id, u.username
-            ORDER BY total DESC, avg_anticipacion_segundos DESC, cant_pronosticos ASC;
+            ORDER BY 
+                total DESC,                          -- 1. Más Puntos
+                cant_pronosticos DESC,               -- 2. Más Partidos Jugados (Participación)
+                avg_anticipacion_segundos DESC,      -- 3. Mayor Anticipación
+                (COALESCE(MAX(att.total_intentos), 0) / NULLIF(COUNT(p.id), 0)) ASC; -- 4. Menor promedio
             """
             
-            cursor.execute(sql, tuple(params))
+            # CORRECCIÓN AQUÍ: params * 2 porque sql_partidos_filtrados aparece dos veces en la query
+            cursor.execute(sql, tuple(params * 2))
             filas = cursor.fetchall()
             
-            # Procesamos el resultado para calcular la tasa de participación en Python
             resultados_procesados = []
             for row in filas:
-                # row índices: 0:user, 1:total, 2:gan, 3:cai, 4:riv, 5:cant_pron, 6:avg_sec
                 cant_pronosticos = row[5]
                 promedio_participacion = cant_pronosticos / total_partidos_contexto
                 
-                # Agregamos el promedio al final de la fila (índice 7)
-                lista_row = list(row)
-                lista_row.append(promedio_participacion)
+                # IMPORTANTE: Recortamos row[:7] para eliminar la columna auxiliar 'total_intentos_raw'
+                # y que la interfaz reciba exactamente lo que espera.
+                lista_row = list(row[:7])
+                lista_row.append(promedio_participacion) # Índice 7 final
                 resultados_procesados.append(lista_row)
                 
             return resultados_procesados

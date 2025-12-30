@@ -402,46 +402,51 @@ class SistemaIndependiente:
         self.btn_pron_por_usuario = ft.ElevatedButton("Por usuario", icon=ft.Icons.PERSON, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('usuario'))
 
         # --- DEFINICIÓN DE COLUMNAS ---
-        columnas_partidos = [ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left)), ft.DataColumn(ft.Container(content=ft.Text("Tu pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Tus puntos", color="green", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center))]
+        columnas_partidos = [
+            ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Tu pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Tus puntos", color="green", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center))
+        ]
 
         columnas_pronosticos = [
-            ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Fecha Predicción", color="white70", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center_left), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Fecha Predicción", color="white70", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Puntos", color="green", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center), numeric=True, on_sort=self._ordenar_tabla_pronosticos)
         ]
 
         ancho_usuario = 110 
         
         columnas_estadisticas = [
-            ft.DataColumn(ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), numeric=True), 
-            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center_left)), 
-            ft.DataColumn(ft.Text("Puntos\nTotales", color="yellow", weight=ft.FontWeight.BOLD), numeric=True), 
-            ft.DataColumn(ft.Text("Pts.\nGanador", color="white"), numeric=True), 
-            ft.DataColumn(ft.Text("Pts.\nGoles CAI", color="white"), numeric=True), 
-            ft.DataColumn(ft.Text("Pts.\nGoles Rival", color="white"), numeric=True),
-            # NUEVAS COLUMNAS
-            ft.DataColumn(ft.Text("Tasa\nPart.", color="cyan"), numeric=True),
-            ft.DataColumn(ft.Container(content=ft.Text("Anticipación\nPromedio", color="cyan"), width=200, alignment=ft.alignment.center_left))
+            ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Puntos\nTotales", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nGanador", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nGoles CAI", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nGoles Rival", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Tasa\nPart.", color="cyan", text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Anticipación\nPromedio", color="cyan", text_align=ft.TextAlign.CENTER), width=200, alignment=ft.alignment.center))
         ]
 
         columnas_copas = [
-            ft.DataColumn(ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), numeric=True),
-            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center_left)),
-            ft.DataColumn(ft.Container(content=ft.Text("Torneos ganados", color="yellow", weight=ft.FontWeight.BOLD), width=120, alignment=ft.alignment.center), numeric=True)
+            ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Torneos ganados", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=120, alignment=ft.alignment.center))
         ]
 
         columnas_rivales = [
-            ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)),
-            ft.DataColumn(ft.Container(content=ft.Text("Otro nombre", color="cyan", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left))
+            ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Otro nombre", color="cyan", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center))
         ]
 
         # --- DEFINICIÓN DE TABLAS ---
-        # Se aumenta el ancho de la tabla de estadísticas para las nuevas columnas (1200)
         self.tabla_estadisticas_header = ft.DataTable(width=1200, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=15, columns=columnas_estadisticas, rows=[])
         self.tabla_estadisticas = ft.DataTable(width=1200, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
         
@@ -530,31 +535,41 @@ class SistemaIndependiente:
                         scroll=ft.ScrollMode.AUTO, controls=[
                             self.txt_titulo_ranking, 
                             self.loading,
-                            ft.Row(
-                                vertical_alignment=ft.CrossAxisAlignment.START,
+                            # 1. TABLA POSICIONES (SOLA)
+                            ft.Column(
+                                spacing=0,
                                 controls=[
-                                    ft.Column(
-                                        spacing=0,
-                                        controls=[
-                                            self.tabla_estadisticas_header,
-                                            ft.Container(
-                                                height=180, 
-                                                content=ft.Column(
-                                                    scroll=ft.ScrollMode.ALWAYS, 
-                                                    controls=[self.tabla_estadisticas]
-                                                )
-                                            )
-                                        ]
-                                    ),
-                                    ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_filtro_torneo),
-                                    ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_graficos),
-                                    ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_graficos_barra)
+                                    self.tabla_estadisticas_header,
+                                    ft.Container(
+                                        height=180, 
+                                        content=ft.Column(
+                                            scroll=ft.ScrollMode.ALWAYS, 
+                                            controls=[self.tabla_estadisticas]
+                                        )
+                                    )
                                 ]
                             ),
                             
-                            ft.Container(height=10),
+                            ft.Container(height=20), # Espacio intermedio
+
+                            # 2. CONTENEDORES (FILTROS Y GRÁFICOS) EN FILA HORIZONTAL
+                            ft.Row(
+                                alignment=ft.MainAxisAlignment.START,
+                                vertical_alignment=ft.CrossAxisAlignment.START,
+                                controls=[
+                                    self.contenedor_filtro_torneo,
+                                    ft.Container(width=20),
+                                    self.contenedor_graficos,
+                                    ft.Container(width=20),
+                                    self.contenedor_graficos_barra
+                                ]
+                            ),
+                            
+                            ft.Container(height=20), # Espacio intermedio
+
                             self.txt_titulo_copas, 
                             self.loading_copas, 
+                            # 3. TABLA COPAS (ABAJO)
                             ft.Container(
                                 height=260, content=ft.Column(
                                     spacing=0, controls=[
@@ -1602,15 +1617,14 @@ class SistemaIndependiente:
                                 txt_anticip = f"{d} días, {h} horas, {m} minutos y {s} segundos"
 
                         filas_tabla_ranking.append(ft.DataRow(cells=[
-                            ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")), 
+                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center)), 
                             ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=110, alignment=ft.alignment.center_left)), 
-                            ft.DataCell(ft.Text(str(fila[1]), weight=ft.FontWeight.BOLD, color="yellow", size=16)), 
-                            ft.DataCell(ft.Text(str(fila[2]), color="white70")), 
-                            ft.DataCell(ft.Text(str(fila[3]), color="white70")), 
-                            ft.DataCell(ft.Text(str(fila[4]), color="white70")),
-                            # Nuevas Columnas
-                            ft.DataCell(ft.Text(txt_tasa, color="cyan")),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_anticip, color="cyan", size=12), width=200, alignment=ft.alignment.center_left))
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[1]), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=100, alignment=ft.alignment.center)), 
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white70"), width=100, alignment=ft.alignment.center)), 
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white70"), width=100, alignment=ft.alignment.center)), 
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white70"), width=100, alignment=ft.alignment.center)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_tasa, color="cyan"), width=80, alignment=ft.alignment.center)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_anticip, color="cyan", size=12), width=200, alignment=ft.alignment.center))
                         ]))
                     self.tabla_estadisticas.rows = filas_tabla_ranking
                     
@@ -1619,9 +1633,10 @@ class SistemaIndependiente:
                         datos_copas = bd.obtener_torneos_ganados(anio=anio_para_copas)
                         filas_copas = []
                         for i, fila in enumerate(datos_copas, start=1):
+                            # CORRECCIÓN AQUÍ: Usar exactamente los mismos anchos que el Header
                             filas_copas.append(ft.DataRow(cells=[
-                                ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")),
-                                ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left)),
+                                ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center)),
+                                ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center)), 
                                 ft.DataCell(ft.Container(content=ft.Text(str(fila[1]), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=120, alignment=ft.alignment.center))
                             ]))
                         self.tabla_copas.rows = filas_copas
