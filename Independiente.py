@@ -348,7 +348,7 @@ class SistemaIndependiente:
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
                     ft.Text("Gráficos de línea", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
-                    self.btn_grafico_puestos,
+                    self.btn_grafico_puestos, 
                     self.btn_grafico_linea_puntos 
                 ]
             )
@@ -423,7 +423,10 @@ class SistemaIndependiente:
             ft.DataColumn(ft.Text("Puntos\nTotales", color="yellow", weight=ft.FontWeight.BOLD), numeric=True), 
             ft.DataColumn(ft.Text("Pts.\nGanador", color="white"), numeric=True), 
             ft.DataColumn(ft.Text("Pts.\nGoles CAI", color="white"), numeric=True), 
-            ft.DataColumn(ft.Text("Pts.\nGoles Rival", color="white"), numeric=True)
+            ft.DataColumn(ft.Text("Pts.\nGoles Rival", color="white"), numeric=True),
+            # NUEVAS COLUMNAS
+            ft.DataColumn(ft.Text("Tasa\nPart.", color="cyan"), numeric=True),
+            ft.DataColumn(ft.Container(content=ft.Text("Anticipación\nPromedio", color="cyan"), width=200, alignment=ft.alignment.center_left))
         ]
 
         columnas_copas = [
@@ -432,15 +435,15 @@ class SistemaIndependiente:
             ft.DataColumn(ft.Container(content=ft.Text("Torneos ganados", color="yellow", weight=ft.FontWeight.BOLD), width=120, alignment=ft.alignment.center), numeric=True)
         ]
 
-        # Columnas para la tabla de equipos en administración
         columnas_rivales = [
             ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left)),
             ft.DataColumn(ft.Container(content=ft.Text("Otro nombre", color="cyan", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left))
         ]
 
         # --- DEFINICIÓN DE TABLAS ---
-        self.tabla_estadisticas_header = ft.DataTable(width=720, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=15, columns=columnas_estadisticas, rows=[])
-        self.tabla_estadisticas = ft.DataTable(width=720, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
+        # Se aumenta el ancho de la tabla de estadísticas para las nuevas columnas (1200)
+        self.tabla_estadisticas_header = ft.DataTable(width=1200, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=15, columns=columnas_estadisticas, rows=[])
+        self.tabla_estadisticas = ft.DataTable(width=1200, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
         
         self.tabla_copas_header = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_copas, rows=[])
         self.tabla_copas = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_copas, rows=[])
@@ -488,7 +491,6 @@ class SistemaIndependiente:
             rows=[]
         )
 
-        # --- TABLA RIVALES (ADMINISTRACIÓN) ---
         self.tabla_rivales_header = ft.DataTable(
             bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), 
             vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), 
@@ -502,7 +504,6 @@ class SistemaIndependiente:
             columns=columnas_rivales, rows=[]
         )
 
-        # --- FORMULARIO CAMBIO NOMBRE ---
         self.input_admin_nombre = ft.TextField(label="Nombre", width=250, bgcolor="#2D2D2D", color="white", border_color="white24")
         self.input_admin_otro = ft.TextField(label="Otro nombre", width=250, bgcolor="#2D2D2D", color="white", border_color="white24")
         self.btn_guardar_rival = ft.ElevatedButton("Guardar", icon=ft.Icons.SAVE, bgcolor="green", color="white", on_click=self._guardar_rival_admin)
@@ -520,7 +521,6 @@ class SistemaIndependiente:
             padding=20
         )
 
-        # --- DEFINICIÓN DE PESTAÑAS ---
         lista_pestanas = [
             ft.Tab(
                 text="Estadísticas", icon="bar_chart",
@@ -546,11 +546,8 @@ class SistemaIndependiente:
                                             )
                                         ]
                                     ),
-                                    # Filtros
                                     ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_filtro_torneo),
-                                    # Gráficos Línea
                                     ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_graficos),
-                                    # Gráficos Barra
                                     ft.Container(padding=ft.padding.only(left=20), content=self.contenedor_graficos_barra)
                                 ]
                             ),
@@ -683,7 +680,6 @@ class SistemaIndependiente:
                                 ft.Row(
                                     vertical_alignment=ft.CrossAxisAlignment.START,
                                     controls=[
-                                        # Tabla Izquierda
                                         ft.Column(
                                             spacing=0,
                                             controls=[
@@ -698,7 +694,6 @@ class SistemaIndependiente:
                                             ]
                                         ),
                                         ft.Container(width=20),
-                                        # Formulario Derecha
                                         ft.Card(
                                             content=ft.Container(
                                                 content=ft.Column([
@@ -716,7 +711,6 @@ class SistemaIndependiente:
                 )
             )
 
-        # --- DEFINICIÓN DEL DIÁLOGO DE CARGA ---
         self.dlg_cargando_inicio = ft.AlertDialog(
             modal=True,
             title=ft.Text("Actualizando información..."),
@@ -731,7 +725,6 @@ class SistemaIndependiente:
         mis_pestanas = ft.Tabs(selected_index=0, expand=True, tabs=lista_pestanas)
         self.page.add(mis_pestanas)
         
-        # --- LÓGICA DE INICIO ---
         self.page.open(self.dlg_cargando_inicio)
         threading.Thread(target=self._sincronizar_fixture_api, daemon=True).start()
 
@@ -1587,13 +1580,37 @@ class SistemaIndependiente:
                     datos_ranking = bd.obtener_ranking(edicion_id=self.filtro_ranking_edicion_id, anio=self.filtro_ranking_anio)
                     filas_tabla_ranking = []
                     for i, fila in enumerate(datos_ranking, start=1):
+                        # Formatear Tasa
+                        tasa = fila[7]
+                        txt_tasa = f"{tasa:.2f}" 
+                        
+                        # Formatear Anticipación
+                        segundos = fila[6]
+                        if segundos is None:
+                            txt_anticip = "-"
+                        else:
+                            seg = int(segundos)
+                            if seg < 0: 
+                                txt_anticip = "-" # Por seguridad si el pronostico fue despues (raro)
+                            else:
+                                d = seg // 86400
+                                seg %= 86400
+                                h = seg // 3600
+                                seg %= 3600
+                                m = seg // 60
+                                s = seg % 60
+                                txt_anticip = f"{d} días, {h} horas, {m} minutos y {s} segundos"
+
                         filas_tabla_ranking.append(ft.DataRow(cells=[
                             ft.DataCell(ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white")), 
                             ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=110, alignment=ft.alignment.center_left)), 
                             ft.DataCell(ft.Text(str(fila[1]), weight=ft.FontWeight.BOLD, color="yellow", size=16)), 
                             ft.DataCell(ft.Text(str(fila[2]), color="white70")), 
                             ft.DataCell(ft.Text(str(fila[3]), color="white70")), 
-                            ft.DataCell(ft.Text(str(fila[4]), color="white70"))
+                            ft.DataCell(ft.Text(str(fila[4]), color="white70")),
+                            # Nuevas Columnas
+                            ft.DataCell(ft.Text(txt_tasa, color="cyan")),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_anticip, color="cyan", size=12), width=200, alignment=ft.alignment.center_left))
                         ]))
                     self.tabla_estadisticas.rows = filas_tabla_ranking
                     

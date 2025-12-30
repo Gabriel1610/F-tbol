@@ -849,8 +849,8 @@ class BaseDeDatos:
 
     def obtener_ranking(self, edicion_id=None, anio=None):
         """
-        Calcula el ranking filtrando primero los partidos válidos en una subconsulta.
-        Esto evita errores de SQL y mantiene a todos los usuarios visibles.
+        Calcula el ranking incluyendo estadísticas de participación y anticipación.
+        Retorna una lista extendida con la tasa de pronósticos y el tiempo promedio.
         """
         conexion = None
         cursor = None
@@ -860,63 +860,67 @@ class BaseDeDatos:
 
             params = []
 
-            # 1. Construir la subconsulta de partidos filtrados
-            # Esta subconsulta devuelve SOLO los partidos que cumplen el criterio (año o torneo)
-            # y que ya se jugaron.
+            # 1. Filtros de Partidos Jugados
             if edicion_id is not None:
-                # Filtro por Edición
                 sql_partidos_filtrados = """
-                    SELECT id, goles_independiente, goles_rival 
+                    SELECT id, goles_independiente, goles_rival, fecha_hora 
                     FROM partidos 
                     WHERE goles_independiente IS NOT NULL AND edicion_id = %s
                 """
                 params.append(edicion_id)
-                
             elif anio is not None:
-                # Filtro por Año (requiere joins internos)
                 sql_partidos_filtrados = """
-                    SELECT p.id, p.goles_independiente, p.goles_rival 
+                    SELECT p.id, p.goles_independiente, p.goles_rival, p.fecha_hora
                     FROM partidos p
                     JOIN ediciones e ON p.edicion_id = e.id 
                     JOIN anios a ON e.anio_id = a.id 
                     WHERE p.goles_independiente IS NOT NULL AND a.numero = %s
                 """
                 params.append(anio)
-                
             else:
-                # Sin filtro (Global)
                 sql_partidos_filtrados = """
-                    SELECT id, goles_independiente, goles_rival 
+                    SELECT id, goles_independiente, goles_rival, fecha_hora
                     FROM partidos 
                     WHERE goles_independiente IS NOT NULL
                 """
 
-            # 2. Query Principal
+            # 2. Obtener Total de Partidos Jugados en el contexto (para el promedio)
+            cursor.execute(f"SELECT COUNT(*) FROM ({sql_partidos_filtrados}) as t", tuple(params))
+            total_partidos_contexto = cursor.fetchone()[0]
+            
+            if total_partidos_contexto == 0:
+                total_partidos_contexto = 1 # Evitar división por cero
+
+            # 3. Query Principal
+            # Se agrega: p1.fecha_prediccion a la subquery de pronósticos
+            # Se agrega: COUNT(p.id) para contar pronósticos hechos sobre partidos jugados
+            # Se agrega: AVG(TIMESTAMPDIFF) para calcular anticipación promedio
             sql = f"""
             SELECT 
                 u.username,
                 
-                -- Columna 2: Puntos Totales
+                -- [1] Puntos Totales
                 COALESCE(SUM(
                     (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END) +
                     (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
                     (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END)
                 ), 0) AS total,
 
-                -- Columna 3: Puntos por Ganador
+                -- [2-4] Desglose Puntos
                 COALESCE(SUM(CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END), 0) AS pts_ganador,
-
-                -- Columna 4: Puntos por Goles Independiente
                 COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END), 0) AS pts_cai,
+                COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival,
 
-                -- Columna 5: Puntos por Goles Rival
-                COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival
+                -- [5] Cantidad de pronósticos hechos
+                COUNT(p.id) as cant_pronosticos,
+                
+                -- [6] Promedio de segundos de anticipación (Fecha Partido - Fecha Pronóstico)
+                AVG(TIMESTAMPDIFF(SECOND, pr.fecha_prediccion, p.fecha_hora)) as avg_anticipacion_segundos
 
             FROM usuarios u
             
-            -- Unimos con los pronósticos (última versión de cada uno)
             LEFT JOIN (
-                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
+                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival, p1.fecha_prediccion
                 FROM pronosticos p1
                 INNER JOIN (
                     SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
@@ -927,24 +931,35 @@ class BaseDeDatos:
                     AND p1.fecha_prediccion = p2.max_fecha
             ) pr ON u.id = pr.usuario_id
             
-            -- Unimos con la SUBCONSULTA de partidos ya filtrada (p)
-            -- Si el filtro descarta un partido, aquí será NULL y no sumará puntos,
-            -- pero el usuario seguirá apareciendo en la lista.
             LEFT JOIN ({sql_partidos_filtrados}) p ON pr.partido_id = p.id
             
             GROUP BY u.id, u.username
-            ORDER BY total DESC;
+            ORDER BY total DESC, avg_anticipacion_segundos DESC, cant_pronosticos ASC;
             """
             
             cursor.execute(sql, tuple(params))
-            return cursor.fetchall()
+            filas = cursor.fetchall()
+            
+            # Procesamos el resultado para calcular la tasa de participación en Python
+            resultados_procesados = []
+            for row in filas:
+                # row índices: 0:user, 1:total, 2:gan, 3:cai, 4:riv, 5:cant_pron, 6:avg_sec
+                cant_pronosticos = row[5]
+                promedio_participacion = cant_pronosticos / total_partidos_contexto
+                
+                # Agregamos el promedio al final de la fila (índice 7)
+                lista_row = list(row)
+                lista_row.append(promedio_participacion)
+                resultados_procesados.append(lista_row)
+                
+            return resultados_procesados
 
         except Exception as e:
             logger.error(f"Error calculando ranking en BD: {e}")
             return []
         finally:
             if cursor: cursor.close()
-            if conexion: conexion.close()    
+            if conexion: conexion.close()
 
     def validar_usuario(self, username, password):
         conexion = None
