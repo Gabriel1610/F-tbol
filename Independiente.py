@@ -333,6 +333,8 @@ class SistemaIndependiente:
         self.loading_admin = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
         self.loading_torneos_admin = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
         self.loading_copas = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
+        # NUEVA BARRA DE CARGA
+        self.loading_falso_profeta = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
 
         # --- CONTENEDOR 1: FILTROS ---
         self.btn_ranking_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_torneo_ranking)
@@ -400,6 +402,7 @@ class SistemaIndependiente:
         # --- TÍTULOS DINÁMICOS ---
         self.txt_titulo_ranking = ft.Text("Tabla de posiciones histórica", size=28, weight=ft.FontWeight.BOLD, color="white")
         self.txt_titulo_copas = ft.Text("Torneos ganados en la historia", size=24, weight=ft.FontWeight.BOLD, color="white")
+        self.txt_titulo_falso_profeta = ft.Text("Ranking de falso profeta", size=24, weight=ft.FontWeight.BOLD, color="white") # NUEVO TÍTULO
         
         self.txt_titulo_partidos = ft.Text("Partidos por jugar", size=28, weight=ft.FontWeight.BOLD, color="white")
         self.txt_titulo_pronosticos = ft.Text("Todos los pronósticos", size=28, weight=ft.FontWeight.BOLD, color="white") 
@@ -421,7 +424,7 @@ class SistemaIndependiente:
         self.btn_pron_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('equipo'))
         self.btn_pron_por_usuario = ft.ElevatedButton("Por usuario", icon=ft.Icons.PERSON, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('usuario'))
 
-        # --- DEFINICIÓN DE COLUMNAS (MODIFICADO: MAYÚSCULA INICIAL SOLO EN PRIMERA PALABRA) ---
+        # --- DEFINICIÓN DE COLUMNAS ---
         columnas_partidos = [
             ft.DataColumn(ft.Container(content=ft.Text("Vs (rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), 
@@ -444,7 +447,6 @@ class SistemaIndependiente:
 
         ancho_usuario = 110 
         
-        # --- COLUMNAS ESTADÍSTICAS (MODIFICADO: MAYÚSCULA INICIAL SOLO EN PRIMERA PALABRA) ---
         columnas_estadisticas = [
             ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center)), 
@@ -464,6 +466,13 @@ class SistemaIndependiente:
             ft.DataColumn(ft.Container(content=ft.Text("Torneos ganados", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=120, alignment=ft.alignment.center))
         ]
 
+        # NUEVAS COLUMNAS FALSO PROFETA
+        columnas_falso_profeta = [
+            ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Fallos", color="red", weight=ft.FontWeight.BOLD), width=120, alignment=ft.alignment.center), numeric=True)
+        ]
+
         columnas_rivales = [
             ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center)),
             ft.DataColumn(ft.Container(content=ft.Text("Otro nombre", color="cyan", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center))
@@ -475,6 +484,10 @@ class SistemaIndependiente:
         
         self.tabla_copas_header = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_copas, rows=[])
         self.tabla_copas = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_copas, rows=[])
+
+        # NUEVA TABLA FALSO PROFETA
+        self.tabla_falso_profeta_header = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_falso_profeta, rows=[])
+        self.tabla_falso_profeta = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_falso_profeta, rows=[])
 
         self.tabla_partidos_header = ft.DataTable(
             bgcolor="#2D2D2D", 
@@ -590,16 +603,45 @@ class SistemaIndependiente:
                             
                             ft.Container(height=20), # Espacio intermedio
 
-                            self.txt_titulo_copas, 
-                            self.loading_copas, 
-                            # 3. TABLA COPAS (ABAJO)
-                            ft.Container(
-                                height=260, content=ft.Column(
-                                    spacing=0, controls=[
-                                        self.tabla_copas_header,
-                                        ft.Container(height=180, content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_copas]))
-                                    ]
-                                )
+                            # 3. FILA INFERIOR: COPAS Y FALSO PROFETA
+                            ft.Row(
+                                alignment=ft.MainAxisAlignment.START,
+                                vertical_alignment=ft.CrossAxisAlignment.START,
+                                controls=[
+                                    # COLUMNA IZQUIERDA: TORNEOS GANADOS
+                                    ft.Column(
+                                        controls=[
+                                            self.txt_titulo_copas,
+                                            self.loading_copas,
+                                            ft.Container(
+                                                height=260, content=ft.Column(
+                                                    spacing=0, controls=[
+                                                        self.tabla_copas_header,
+                                                        ft.Container(height=180, content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_copas]))
+                                                    ]
+                                                )
+                                            )
+                                        ]
+                                    ),
+                                    
+                                    ft.Container(width=50), # SEPARADOR
+                                    
+                                    # COLUMNA DERECHA: FALSO PROFETA
+                                    ft.Column(
+                                        controls=[
+                                            self.txt_titulo_falso_profeta,
+                                            self.loading_falso_profeta,
+                                            ft.Container(
+                                                height=260, content=ft.Column(
+                                                    spacing=0, controls=[
+                                                        self.tabla_falso_profeta_header,
+                                                        ft.Container(height=180, content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_falso_profeta]))
+                                                    ]
+                                                )
+                                            )
+                                        ]
+                                    )
+                                ]
                             )
                         ]
                     )
@@ -1595,7 +1637,9 @@ class SistemaIndependiente:
         if not any([actualizar_partidos, actualizar_pronosticos, actualizar_ranking, actualizar_admin]):
             return
 
-        if actualizar_ranking: self.loading.visible = True
+        if actualizar_ranking: 
+            self.loading.visible = True
+            self.loading_falso_profeta.visible = True # Nueva carga
         
         if actualizar_ranking and actualizar_copas and self.filtro_ranking_edicion_id is None: 
             self.loading_copas.visible = True 
@@ -1615,8 +1659,9 @@ class SistemaIndependiente:
             try:
                 bd = BaseDeDatos()
                 
-                # --- 0. RANKING Y COPAS ---
+                # --- 0. RANKING, COPAS Y FALSO PROFETA ---
                 if actualizar_ranking:
+                    # 0.A Ranking Principal
                     datos_ranking = bd.obtener_ranking(edicion_id=self.filtro_ranking_edicion_id, anio=self.filtro_ranking_anio)
                     filas_tabla_ranking = []
                     for i, fila in enumerate(datos_ranking, start=1):
@@ -1630,7 +1675,7 @@ class SistemaIndependiente:
                         
                         txt_partidos_jug = str(cant_partidos_jug)
                         
-                        # FORMATEO EN ESPAÑOL (COMA DECIMAL Y ESPACIO EN %)
+                        # FORMATEO EN ESPAÑOL
                         txt_promedio_intentos = f"{promedio_intentos:.2f}".replace('.', ',')
                         txt_efectividad = f"{efectividad_val:.2f} %".replace('.', ',')
                         
@@ -1661,11 +1706,23 @@ class SistemaIndependiente:
                             ft.DataCell(ft.Container(content=ft.Text(txt_partidos_jug, color="cyan"), width=80, alignment=ft.alignment.center)),
                             ft.DataCell(ft.Container(content=ft.Text(txt_anticip, color="cyan", size=12), width=200, alignment=ft.alignment.center)),
                             ft.DataCell(ft.Container(content=ft.Text(txt_promedio_intentos, color="cyan"), width=80, alignment=ft.alignment.center)),
-                            # COLUMNA EFECTIVIDAD
                             ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center))
                         ]))
                     self.tabla_estadisticas.rows = filas_tabla_ranking
                     
+                    # 0.B Falso Profeta (Depende de los mismos filtros)
+                    datos_fp = bd.obtener_ranking_falso_profeta(edicion_id=self.filtro_ranking_edicion_id, anio=self.filtro_ranking_anio)
+                    filas_fp = []
+                    for i, fila in enumerate(datos_fp, start=1):
+                        # fila: [0] username, [1] cantidad_fallos
+                        filas_fp.append(ft.DataRow(cells=[
+                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[0]), weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[1]), weight=ft.FontWeight.BOLD, color="red", size=16), width=120, alignment=ft.alignment.center))
+                        ]))
+                    self.tabla_falso_profeta.rows = filas_fp
+                    
+                    # 0.C Copas Históricas
                     if actualizar_copas and self.filtro_ranking_edicion_id is None:
                         anio_para_copas = self.filtro_ranking_anio
                         datos_copas = bd.obtener_torneos_ganados(anio=anio_para_copas)
@@ -1827,6 +1884,7 @@ class SistemaIndependiente:
             finally:
                 self.loading.visible = False
                 self.loading_copas.visible = False 
+                self.loading_falso_profeta.visible = False # Apagar nueva barra
                 self.loading_partidos.visible = False
                 self.loading_pronosticos.visible = False 
                 self.loading_admin.visible = False

@@ -968,6 +968,64 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
+    def obtener_ranking_falso_profeta(self, edicion_id=None, anio=None):
+        """
+        Ranking de usuarios que pronosticaron victoria de CAI y CAI perdió.
+        Ordenado por cantidad de fallos descendente, luego nombre usuario ascendente.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            params = []
+            filtro_sql = ""
+
+            # Aplicar filtros si existen
+            if edicion_id is not None:
+                filtro_sql = " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql = " AND a.numero = %s "
+                params.append(anio)
+
+            sql = f"""
+            SELECT 
+                u.username,
+                COUNT(*) as cantidad_fallos
+            FROM pronosticos pr
+            INNER JOIN (
+                -- Subconsulta para considerar solo el último pronóstico
+                SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                FROM pronosticos
+                GROUP BY usuario_id, partido_id
+            ) p2 ON pr.usuario_id = p2.usuario_id 
+                AND pr.partido_id = p2.partido_id 
+                AND pr.fecha_prediccion = p2.max_fecha
+            JOIN partidos p ON pr.partido_id = p.id
+            JOIN usuarios u ON pr.usuario_id = u.id
+            JOIN ediciones e ON p.edicion_id = e.id
+            JOIN anios a ON e.anio_id = a.id
+            WHERE 
+                p.goles_independiente IS NOT NULL
+                AND pr.pred_goles_independiente > pr.pred_goles_rival -- Pronosticó GANA CAI
+                AND p.goles_independiente < p.goles_rival             -- Resultado PERDIÓ CAI
+                {filtro_sql}
+            GROUP BY u.id, u.username
+            ORDER BY cantidad_fallos DESC, u.username ASC
+            """
+            
+            cursor.execute(sql, tuple(params))
+            return cursor.fetchall()
+
+        except Exception as e:
+            logger.error(f"Error calculando ranking falso profeta: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+            
     def obtener_ranking(self, edicion_id=None, anio=None):
         """
         Calcula el ranking incluyendo efectividad (porcentaje de aciertos exactos).
@@ -1108,7 +1166,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-            
+
     def validar_usuario(self, username, password):
         conexion = None
         cursor = None
