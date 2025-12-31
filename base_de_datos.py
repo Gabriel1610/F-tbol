@@ -968,68 +968,11 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    def obtener_ranking_falso_profeta(self, edicion_id=None, anio=None):
-        """
-        Ranking de usuarios que pronosticaron victoria de CAI y CAI perdió.
-        Ordenado por cantidad de fallos descendente, luego nombre usuario ascendente.
-        """
-        conexion = None
-        cursor = None
-        try:
-            conexion = self.abrir()
-            cursor = conexion.cursor()
-
-            params = []
-            filtro_sql = ""
-
-            # Aplicar filtros si existen
-            if edicion_id is not None:
-                filtro_sql = " AND p.edicion_id = %s "
-                params.append(edicion_id)
-            elif anio is not None:
-                filtro_sql = " AND a.numero = %s "
-                params.append(anio)
-
-            sql = f"""
-            SELECT 
-                u.username,
-                COUNT(*) as cantidad_fallos
-            FROM pronosticos pr
-            INNER JOIN (
-                -- Subconsulta para considerar solo el último pronóstico
-                SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
-                FROM pronosticos
-                GROUP BY usuario_id, partido_id
-            ) p2 ON pr.usuario_id = p2.usuario_id 
-                AND pr.partido_id = p2.partido_id 
-                AND pr.fecha_prediccion = p2.max_fecha
-            JOIN partidos p ON pr.partido_id = p.id
-            JOIN usuarios u ON pr.usuario_id = u.id
-            JOIN ediciones e ON p.edicion_id = e.id
-            JOIN anios a ON e.anio_id = a.id
-            WHERE 
-                p.goles_independiente IS NOT NULL
-                AND pr.pred_goles_independiente > pr.pred_goles_rival -- Pronosticó GANA CAI
-                AND p.goles_independiente < p.goles_rival             -- Resultado PERDIÓ CAI
-                {filtro_sql}
-            GROUP BY u.id, u.username
-            ORDER BY cantidad_fallos DESC, u.username ASC
-            """
-            
-            cursor.execute(sql, tuple(params))
-            return cursor.fetchall()
-
-        except Exception as e:
-            logger.error(f"Error calculando ranking falso profeta: {e}")
-            return []
-        finally:
-            if cursor: cursor.close()
-            if conexion: conexion.close()
-            
     def obtener_ranking(self, edicion_id=None, anio=None):
         """
-        Calcula el ranking incluyendo efectividad (porcentaje de aciertos exactos).
-        Retorna: ..., promedio_intentos, efectividad
+        Calcula el ranking incluyendo efectividad y ahora devuelve también el 
+        total de partidos del contexto para calcular porcentajes de participación.
+        Retorna: ..., promedio_intentos, efectividad, total_partidos_contexto
         """
         conexion = None
         cursor = None
@@ -1063,7 +1006,7 @@ class BaseDeDatos:
                     WHERE goles_independiente IS NOT NULL
                 """
 
-            # 2. Obtener Total de Partidos Jugados en el contexto (auxiliar)
+            # 2. Obtener Total de Partidos Jugados en el contexto (Necesario para %)
             cursor.execute(f"SELECT COUNT(*) FROM ({sql_partidos_filtrados}) as t", tuple(params))
             total_partidos_contexto = cursor.fetchone()[0]
             if total_partidos_contexto == 0: total_partidos_contexto = 1
@@ -1094,12 +1037,12 @@ class BaseDeDatos:
                 -- [7] Columna Auxiliar: Total de intentos (para promedio intentos)
                 COALESCE(MAX(att.total_intentos), 0) as total_intentos_raw,
 
-                -- [8] NUEVO: Cantidad de Aciertos Exactos (Plenos)
+                -- [8] Cantidad de Aciertos Exactos (Plenos)
                 COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente AND p.goles_rival = pr.pred_goles_rival THEN 1 ELSE 0 END), 0) as cant_exactos
 
             FROM usuarios u
             
-            -- Join para obtener el ÚLTIMO pronóstico (el que cuenta para puntos, anticipación y efectividad)
+            -- Join para obtener el ÚLTIMO pronóstico
             LEFT JOIN (
                 SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival, p1.fecha_prediccion
                 FROM pronosticos p1
@@ -1130,7 +1073,6 @@ class BaseDeDatos:
                 (COALESCE(MAX(att.total_intentos), 0) / NULLIF(COUNT(p.id), 0)) ASC;
             """
             
-            # Duplicamos params porque filtro_sql se usa 2 veces
             cursor.execute(sql, tuple(params * 2))
             filas = cursor.fetchall()
             
@@ -1143,19 +1085,20 @@ class BaseDeDatos:
                 # Criterio 4: Promedio Intentos
                 if cant_pronosticos > 0:
                     promedio_intentos = total_intentos / cant_pronosticos
-                    # Cálculo de Efectividad (%)
                     efectividad = (cant_exactos / cant_pronosticos) * 100
                 else:
                     promedio_intentos = 0
                     efectividad = 0.0
                 
                 # Armamos la fila final:
-                # 0-6: Datos estándar (incluye cant_pronosticos en idx 5)
+                # 0-6: Datos estándar
                 # 7: Promedio Intentos
-                # 8: Efectividad (Nuevo)
+                # 8: Efectividad
+                # 9: Total Partidos Contexto (NUEVO, para calcular % en UI)
                 lista_row = list(row[:7])
                 lista_row.append(promedio_intentos) 
-                lista_row.append(efectividad) 
+                lista_row.append(efectividad)
+                lista_row.append(total_partidos_contexto) 
                 resultados_procesados.append(lista_row)
                 
             return resultados_procesados
@@ -1166,7 +1109,149 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
+    
+    def obtener_indice_optimismo_pesimismo(self, edicion_id=None, anio=None):
+        """
+        Calcula el índice unificado de Optimismo/Pesimismo mostrando a TODOS los usuarios.
+        Formula: (Pred_CAI - Pred_Rival) - (Real_CAI - Real_Rival)
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
 
+            params = []
+            filtro_sql = ""
+
+            # Filtros se aplican a la subconsulta de partidos jugados
+            if edicion_id is not None:
+                filtro_sql = " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql = " AND a.numero = %s "
+                params.append(anio)
+
+            sql = f"""
+            SELECT 
+                u.username,
+                stats.indice_promedio
+            FROM usuarios u
+            LEFT JOIN (
+                SELECT 
+                    pr.usuario_id,
+                    AVG(
+                        (CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) - 
+                        (CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED))
+                    ) as indice_promedio
+                FROM pronosticos pr
+                INNER JOIN (
+                    -- Último pronóstico por partido
+                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    GROUP BY usuario_id, partido_id
+                ) p2 ON pr.usuario_id = p2.usuario_id 
+                    AND pr.partido_id = p2.partido_id 
+                    AND pr.fecha_prediccion = p2.max_fecha
+                JOIN partidos p ON pr.partido_id = p.id
+                JOIN ediciones e ON p.edicion_id = e.id
+                JOIN anios a ON e.anio_id = a.id
+                WHERE 
+                    p.goles_independiente IS NOT NULL
+                    {filtro_sql}
+                GROUP BY pr.usuario_id
+            ) stats ON u.id = stats.usuario_id
+            ORDER BY 
+                CASE WHEN stats.indice_promedio IS NULL THEN 1 ELSE 0 END, -- Nulos al final (o principio según preferencia)
+                stats.indice_promedio DESC, 
+                u.username ASC
+            """
+            
+            cursor.execute(sql, tuple(params))
+            return cursor.fetchall()
+
+        except Exception as e:
+            logger.error(f"Error calculando indice opt/pes: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def obtener_ranking_falso_profeta(self, edicion_id=None, anio=None):
+        """
+        Ranking de Falso Profeta REVISADO:
+        - Victorias Pronosticadas: Cuántas veces dijo que ganaba CAI.
+        - Porcentaje Acierto: Cuántas de esas veces realmente ganó CAI.
+        - Orden: Ascendente por porcentaje (0% = El mayor falso profeta).
+        - Muestra TODOS los usuarios.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            params = []
+            filtro_sql = ""
+
+            if edicion_id is not None:
+                filtro_sql = " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql = " AND a.numero = %s "
+                params.append(anio)
+
+            sql = f"""
+            SELECT 
+                u.username,
+                COALESCE(stats.victorias_pronosticadas, 0) as victorias_pronosticadas,
+                COALESCE(stats.porcentaje_acierto, 0) as porcentaje_acierto
+            FROM usuarios u
+            LEFT JOIN (
+                SELECT 
+                    pr.usuario_id,
+                    -- Total predicciones de victoria
+                    COUNT(*) as victorias_pronosticadas,
+                    
+                    -- Porcentaje: (Veces que realmente ganó / Total predicciones victoria) * 100
+                    (SUM(CASE WHEN p.goles_independiente > p.goles_rival THEN 1 ELSE 0 END) / COUNT(*)) * 100 as porcentaje_acierto
+                    
+                FROM pronosticos pr
+                INNER JOIN (
+                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    GROUP BY usuario_id, partido_id
+                ) p2 ON pr.usuario_id = p2.usuario_id 
+                    AND pr.partido_id = p2.partido_id 
+                    AND pr.fecha_prediccion = p2.max_fecha
+                JOIN partidos p ON pr.partido_id = p.id
+                JOIN ediciones e ON p.edicion_id = e.id
+                JOIN anios a ON e.anio_id = a.id
+                WHERE 
+                    p.goles_independiente IS NOT NULL
+                    AND pr.pred_goles_independiente > pr.pred_goles_rival -- FILTRO: Solo predicciones de VICTORIA
+                    {filtro_sql}
+                GROUP BY pr.usuario_id
+            ) stats ON u.id = stats.usuario_id
+            
+            ORDER BY 
+                -- Ordenar por porcentaje ascendente (0 primero)
+                -- Pero si tiene 0 predicciones (victorias_pronosticadas = 0), lo mandamos al fondo
+                CASE WHEN COALESCE(stats.victorias_pronosticadas, 0) = 0 THEN 1 ELSE 0 END,
+                porcentaje_acierto ASC, 
+                u.username ASC
+            """
+            
+            cursor.execute(sql, tuple(params))
+            return cursor.fetchall()
+
+        except Exception as e:
+            logger.error(f"Error calculando ranking falso profeta: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+                 
     def validar_usuario(self, username, password):
         conexion = None
         cursor = None
