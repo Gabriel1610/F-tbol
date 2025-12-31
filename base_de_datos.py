@@ -970,9 +970,8 @@ class BaseDeDatos:
 
     def obtener_ranking(self, edicion_id=None, anio=None):
         """
-        Calcula el ranking con los nuevos criterios de desempate.
-        CORRECCIÓN: Se duplican los parámetros porque el filtro SQL se inyecta 2 veces.
-        Retorna en la última columna el 'Promedio de Intentos' para mostrar en la tabla.
+        Calcula el ranking incluyendo efectividad (porcentaje de aciertos exactos).
+        Retorna: ..., promedio_intentos, efectividad
         """
         conexion = None
         cursor = None
@@ -1006,7 +1005,7 @@ class BaseDeDatos:
                     WHERE goles_independiente IS NOT NULL
                 """
 
-            # 2. Obtener Total de Partidos Jugados en el contexto (ya no es crítico para el promedio, pero se deja por seguridad)
+            # 2. Obtener Total de Partidos Jugados en el contexto (auxiliar)
             cursor.execute(f"SELECT COUNT(*) FROM ({sql_partidos_filtrados}) as t", tuple(params))
             total_partidos_contexto = cursor.fetchone()[0]
             if total_partidos_contexto == 0: total_partidos_contexto = 1
@@ -1034,12 +1033,15 @@ class BaseDeDatos:
                 -- [6] Promedio de anticipación
                 AVG(TIMESTAMPDIFF(SECOND, pr.fecha_prediccion, p.fecha_hora)) as avg_anticipacion_segundos,
                 
-                -- [7] Columna Auxiliar: Total de intentos (CORREGIDO con MAX)
-                COALESCE(MAX(att.total_intentos), 0) as total_intentos_raw
+                -- [7] Columna Auxiliar: Total de intentos (para promedio intentos)
+                COALESCE(MAX(att.total_intentos), 0) as total_intentos_raw,
+
+                -- [8] NUEVO: Cantidad de Aciertos Exactos (Plenos)
+                COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente AND p.goles_rival = pr.pred_goles_rival THEN 1 ELSE 0 END), 0) as cant_exactos
 
             FROM usuarios u
             
-            -- Join para obtener el ÚLTIMO pronóstico (para puntos y anticipación)
+            -- Join para obtener el ÚLTIMO pronóstico (el que cuenta para puntos, anticipación y efectividad)
             LEFT JOIN (
                 SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival, p1.fecha_prediccion
                 FROM pronosticos p1
@@ -1054,43 +1056,48 @@ class BaseDeDatos:
             
             LEFT JOIN ({sql_partidos_filtrados}) p ON pr.partido_id = p.id
             
-            -- Join para contar TODOS los intentos (para el desempate de eficiencia)
+            -- Join para contar TODOS los intentos históricos
             LEFT JOIN (
                 SELECT pr2.usuario_id, COUNT(*) as total_intentos
                 FROM pronosticos pr2
-                -- Inyección 2 del filtro: Consume otro set de params
                 JOIN ({sql_partidos_filtrados}) p_scope ON pr2.partido_id = p_scope.id
                 GROUP BY pr2.usuario_id
             ) att ON u.id = att.usuario_id
             
             GROUP BY u.id, u.username
             ORDER BY 
-                total DESC,                          -- 1. Más Puntos
-                cant_pronosticos DESC,               -- 2. Más Partidos Jugados (Participación)
-                avg_anticipacion_segundos DESC,      -- 3. Mayor Anticipación
-                (COALESCE(MAX(att.total_intentos), 0) / NULLIF(COUNT(p.id), 0)) ASC; -- 4. Menor promedio
+                total DESC,
+                cant_pronosticos DESC,
+                avg_anticipacion_segundos DESC,
+                (COALESCE(MAX(att.total_intentos), 0) / NULLIF(COUNT(p.id), 0)) ASC;
             """
             
-            # CORRECCIÓN AQUÍ: params * 2 porque sql_partidos_filtrados aparece dos veces en la query
+            # Duplicamos params porque filtro_sql se usa 2 veces
             cursor.execute(sql, tuple(params * 2))
             filas = cursor.fetchall()
             
             resultados_procesados = []
             for row in filas:
                 cant_pronosticos = row[5]
-                total_intentos = row[7] # Obtenemos el total de intentos real
+                total_intentos = row[7]
+                cant_exactos = row[8]
                 
-                # Calculamos el Promedio de Intentos (Criterio #4)
+                # Criterio 4: Promedio Intentos
                 if cant_pronosticos > 0:
                     promedio_intentos = total_intentos / cant_pronosticos
+                    # Cálculo de Efectividad (%)
+                    efectividad = (cant_exactos / cant_pronosticos) * 100
                 else:
                     promedio_intentos = 0
+                    efectividad = 0.0
                 
                 # Armamos la fila final:
                 # 0-6: Datos estándar (incluye cant_pronosticos en idx 5)
-                # 7: Promedio Intentos (reemplaza al auxiliar total_intentos_raw)
+                # 7: Promedio Intentos
+                # 8: Efectividad (Nuevo)
                 lista_row = list(row[:7])
                 lista_row.append(promedio_intentos) 
+                lista_row.append(efectividad) 
                 resultados_procesados.append(lista_row)
                 
             return resultados_procesados
@@ -1101,6 +1108,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
+            
     def validar_usuario(self, username, password):
         conexion = None
         cursor = None

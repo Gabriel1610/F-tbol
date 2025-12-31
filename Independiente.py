@@ -314,9 +314,13 @@ class SistemaIndependiente:
         self.usuario_grafico_barra_sel = None 
 
         # --- SELECTORES ---
+        
+        carpeta_actual = os.path.dirname(os.path.abspath(__file__))
+        ruta_img = os.path.join(carpeta_actual, NOMBRE_ICONO)
+
         self.page.appbar = ft.AppBar(
-            leading=ft.Icon(ft.Icons.SECURITY, color=Estilos.COLOR_ROJO_CAI),
-            leading_width=40,
+            leading=ft.Container(content=ft.Image(src=ruta_img, fit=ft.ImageFit.CONTAIN), padding=5),
+            leading_width=50,
             title=ft.Text(f"Bienvenido, {usuario}", weight=ft.FontWeight.BOLD, color=Estilos.COLOR_ROJO_CAI),
             center_title=False, bgcolor="white", 
             actions=[ft.IconButton(icon=ft.Icons.LOGOUT, tooltip="Cerrar Sesión", icon_color=Estilos.COLOR_ROJO_CAI, on_click=self._cerrar_sesion), ft.Container(width=10)]
@@ -371,7 +375,6 @@ class SistemaIndependiente:
         )
 
         # --- CONTENEDOR 3: GRÁFICOS DE BARRA ---
-        # MODIFICACIÓN: Se aumentó el height a 45 para que se lea la "p" de "partidos"
         self.btn_grafico_barras_puntos = ft.ElevatedButton("Puntos por partidos", icon=ft.Icons.BAR_CHART, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_barras)
 
         self.contenedor_graficos_barra = ft.Container(
@@ -418,42 +421,41 @@ class SistemaIndependiente:
         self.btn_pron_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('equipo'))
         self.btn_pron_por_usuario = ft.ElevatedButton("Por usuario", icon=ft.Icons.PERSON, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('usuario'))
 
-        # --- DEFINICIÓN DE COLUMNAS (ENCABEZADOS CENTRADOS CON ANCHO FIJO) ---
+        # --- DEFINICIÓN DE COLUMNAS (MODIFICADO: MAYÚSCULA INICIAL SOLO EN PRIMERA PALABRA) ---
         columnas_partidos = [
-            ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Vs (rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Fecha y hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Tu pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Tus puntos", color="green", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center))
         ]
 
         columnas_pronosticos = [
-            ft.DataColumn(ft.Container(content=ft.Text("Vs (Rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Fecha y Hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Vs (rival)", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Fecha y hora", color="white", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Torneo", color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Resultado", color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Pronóstico", color="cyan", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
-            ft.DataColumn(ft.Container(content=ft.Text("Fecha Predicción", color="white70", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
+            ft.DataColumn(ft.Container(content=ft.Text("Fecha predicción", color="white70", weight=ft.FontWeight.BOLD), width=140, alignment=ft.alignment.center), on_sort=self._ordenar_tabla_pronosticos), 
             ft.DataColumn(ft.Container(content=ft.Text("Puntos", color="green", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center), numeric=True, on_sort=self._ordenar_tabla_pronosticos)
         ]
 
         ancho_usuario = 110 
         
-        # --- COLUMNAS ESTADÍSTICAS (MODIFICADO: NOMBRES DE COLUMNAS) ---
+        # --- COLUMNAS ESTADÍSTICAS (MODIFICADO: MAYÚSCULA INICIAL SOLO EN PRIMERA PALABRA) ---
         columnas_estadisticas = [
             ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center)), 
             ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Puntos\nTotales", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nGanador", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nGoles CAI", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nGoles Rival", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)),
-            # CAMBIO DE NOMBRE: "Part.\nJug." -> "Partidos\nJugados"
-            ft.DataColumn(ft.Container(content=ft.Text("Partidos\nJugados", color="cyan", text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center)),
-            ft.DataColumn(ft.Container(content=ft.Text("Anticipación\nPromedio", color="cyan", text_align=ft.TextAlign.CENTER), width=200, alignment=ft.alignment.center)),
-            # CAMBIO DE NOMBRE: "Prom.\nIntentos" -> "Promedio\nIntentos"
-            ft.DataColumn(ft.Container(content=ft.Text("Promedio\nIntentos", color="cyan", text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center))
+            ft.DataColumn(ft.Container(content=ft.Text("Puntos\ntotales", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nganador", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\ngoles CAI", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\ngoles rival", color="white", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Partidos\njugados", color="cyan", text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Anticipación\npromedio", color="cyan", text_align=ft.TextAlign.CENTER), width=200, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Promedio\nintentos", color="cyan", text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center)),
+            ft.DataColumn(ft.Container(content=ft.Text("Efectividad\n(puntería)", color="green", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center))
         ]
 
         columnas_copas = [
@@ -468,8 +470,8 @@ class SistemaIndependiente:
         ]
 
         # --- DEFINICIÓN DE TABLAS ---
-        self.tabla_estadisticas_header = ft.DataTable(width=1250, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=15, columns=columnas_estadisticas, rows=[])
-        self.tabla_estadisticas = ft.DataTable(width=1250, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
+        self.tabla_estadisticas_header = ft.DataTable(width=1350, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=15, columns=columnas_estadisticas, rows=[])
+        self.tabla_estadisticas = ft.DataTable(width=1350, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
         
         self.tabla_copas_header = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_copas, rows=[])
         self.tabla_copas = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_copas, rows=[])
@@ -765,6 +767,7 @@ class SistemaIndependiente:
         
         self.page.open(self.dlg_cargando_inicio)
         threading.Thread(target=self._sincronizar_fixture_api, daemon=True).start()
+
     def _procesar_partido_fotmob(self, match):
         """
         Extrae datos limpios de un objeto partido de FotMob con validaciones.
@@ -1619,13 +1622,17 @@ class SistemaIndependiente:
                     for i, fila in enumerate(datos_ranking, start=1):
                         
                         # Datos recuperados de la BD:
-                        # [0] User, [1] Total, [2] Gan, [3] CAI, [4] Riv, [5] Cant_Pron, [6] Anticip, [7] Prom_Intentos
+                        # [0] User, [1] Total, [2] Gan, [3] CAI, [4] Riv, [5] Cant_Pron, [6] Anticip, [7] Prom_Intentos, [8] Efectividad
                         
                         cant_partidos_jug = fila[5]
                         promedio_intentos = fila[7]
+                        efectividad_val = fila[8]
                         
                         txt_partidos_jug = str(cant_partidos_jug)
-                        txt_promedio_intentos = f"{promedio_intentos:.2f}"
+                        
+                        # FORMATEO EN ESPAÑOL (COMA DECIMAL Y ESPACIO EN %)
+                        txt_promedio_intentos = f"{promedio_intentos:.2f}".replace('.', ',')
+                        txt_efectividad = f"{efectividad_val:.2f} %".replace('.', ',')
                         
                         # Formatear Anticipación
                         segundos = fila[6]
@@ -1651,11 +1658,11 @@ class SistemaIndependiente:
                             ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white70"), width=100, alignment=ft.alignment.center)), 
                             ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white70"), width=100, alignment=ft.alignment.center)), 
                             ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white70"), width=100, alignment=ft.alignment.center)),
-                            # NUEVA COLUMNA: Part. Jug.
                             ft.DataCell(ft.Container(content=ft.Text(txt_partidos_jug, color="cyan"), width=80, alignment=ft.alignment.center)),
                             ft.DataCell(ft.Container(content=ft.Text(txt_anticip, color="cyan", size=12), width=200, alignment=ft.alignment.center)),
-                            # COLUMNA AL FINAL: Prom. Intentos
-                            ft.DataCell(ft.Container(content=ft.Text(txt_promedio_intentos, color="cyan"), width=80, alignment=ft.alignment.center))
+                            ft.DataCell(ft.Container(content=ft.Text(txt_promedio_intentos, color="cyan"), width=80, alignment=ft.alignment.center)),
+                            # COLUMNA EFECTIVIDAD
+                            ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center))
                         ]))
                     self.tabla_estadisticas.rows = filas_tabla_ranking
                     
@@ -1829,6 +1836,7 @@ class SistemaIndependiente:
                 self.page.update()
 
         threading.Thread(target=_tarea_en_segundo_plano, daemon=True).start()
+
     def _abrir_selector_torneo(self, e):
         """Abre el modal para filtrar la tabla de PARTIDOS por torneo."""
         # Reutilizamos el diseño de listas
