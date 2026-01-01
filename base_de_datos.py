@@ -346,11 +346,7 @@ class BaseDeDatos:
     def obtener_partidos(self, usuario, filtro='todos', edicion_id=None, rival_id=None):
         """
         Obtiene la lista de partidos filtrada y ordenada.
-        Parámetros:
-            usuario (str): Usuario actual.
-            filtro (str): 'todos', 'jugados', 'futuros', 'torneo', 'sin_pronosticar', 'equipo'.
-            edicion_id (int): ID de la edición (necesario si filtro='torneo').
-            rival_id (int): ID del rival (necesario si filtro='equipo').
+        Incluye cálculo de Error Absoluto en el índice 11.
         """
         conexion = None
         cursor = None
@@ -361,7 +357,7 @@ class BaseDeDatos:
             filtro_sql = ""
             orden_sql = "DESC" 
             
-            # Parametros base para la query (usuario aparece 2 veces en subconsulta)
+            # Parametros base para la query
             params = [usuario, usuario]
 
             if filtro == 'futuros':
@@ -378,9 +374,8 @@ class BaseDeDatos:
                 orden_sql = "ASC"
                 params.append(edicion_id)
             elif filtro == 'equipo' and rival_id is not None:
-                # Nuevo filtro por Rival
                 filtro_sql = "WHERE p.rival_id = %s"
-                orden_sql = "DESC" # Pedido: descendente por Fecha y Hora
+                orden_sql = "DESC"
                 params.append(rival_id)
 
             sql = f"""
@@ -398,6 +393,7 @@ class BaseDeDatos:
                 END as fecha_display,
                 pr.pred_goles_independiente, 
                 pr.pred_goles_rival,
+                -- PUNTOS
                 CASE 
                     WHEN p.goles_independiente IS NULL THEN NULL 
                     WHEN pr.pred_goles_independiente IS NULL THEN 0 
@@ -405,7 +401,16 @@ class BaseDeDatos:
                         (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
-                END as tus_puntos
+                END as tus_puntos,
+                
+                -- [NUEVO CAMPO: Índice 11] ERROR ABSOLUTO
+                CASE 
+                    WHEN p.goles_independiente IS NULL OR pr.pred_goles_independiente IS NULL THEN NULL
+                    ELSE
+                        ABS(CAST(p.goles_independiente AS SIGNED) - CAST(pr.pred_goles_independiente AS SIGNED)) + 
+                        ABS(CAST(p.goles_rival AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED))
+                END as error_absoluto
+
             FROM partidos p
             JOIN rivales r ON p.rival_id = r.id
             JOIN ediciones e ON p.edicion_id = e.id
@@ -440,7 +445,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-
+            
     def obtener_datos_evolucion_puestos(self, edicion_id, usuarios_seleccionados):
         """
         Calcula la evolución del ranking aplicando los nuevos criterios:
@@ -936,7 +941,104 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
+        
+    def obtener_racha_record(self, edicion_id=None, anio=None):
+        """
+        Calcula la MEJOR racha (récord) de partidos consecutivos sumando puntos en la historia (o filtro).
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            params = []
+            filtro_sql = ""
+
+            if edicion_id is not None:
+                filtro_sql = " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql = " AND a.numero = %s "
+                params.append(anio)
+
+            # Query: Misma estructura que racha actual, pero ordenado por Fecha ASCENDENTE
+            # para poder calcular la continuidad desde el principio.
+            sql = f"""
+            SELECT 
+                u.username,
+                p.fecha_hora,
+                CASE 
+                    WHEN pr.pred_goles_independiente IS NULL THEN 0
+                    ELSE
+                        (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
+                END as puntos
+            FROM usuarios u
+            CROSS JOIN partidos p 
+            JOIN ediciones e ON p.edicion_id = e.id
+            JOIN anios a ON e.anio_id = a.id
+            LEFT JOIN (
+                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
+                FROM pronosticos p1
+                INNER JOIN (
+                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    GROUP BY usuario_id, partido_id
+                ) p2 ON p1.usuario_id = p2.usuario_id 
+                    AND p1.partido_id = p2.partido_id 
+                    AND p1.fecha_prediccion = p2.max_fecha
+            ) pr ON u.id = pr.usuario_id AND p.id = pr.partido_id
+            WHERE 
+                p.goles_independiente IS NOT NULL
+                {filtro_sql}
+            ORDER BY u.username ASC, p.fecha_hora ASC
+            """
             
+            cursor.execute(sql, tuple(params))
+            resultados = cursor.fetchall()
+            
+            # --- Algoritmo para encontrar el MAX streak por usuario ---
+            mapa_maximos = {} # {username: max_racha}
+            
+            if resultados:
+                usuario_actual = None
+                racha_temporal = 0
+                
+                for row in resultados:
+                    user = row[0]
+                    puntos = row[2]
+                    
+                    if user != usuario_actual:
+                        # Cambio de usuario, reseteamos contadores
+                        usuario_actual = user
+                        racha_temporal = 0
+                        if user not in mapa_maximos:
+                            mapa_maximos[user] = 0
+                    
+                    if puntos > 0:
+                        racha_temporal += 1
+                        # Si la racha actual supera al máximo guardado, actualizamos
+                        if racha_temporal > mapa_maximos[user]:
+                            mapa_maximos[user] = racha_temporal
+                    else:
+                        # Cortó racha
+                        racha_temporal = 0
+            
+            # Convertir diccionario a lista de tuplas para ordenar
+            lista_final = [(k, v) for k, v in mapa_maximos.items()]
+            
+            # Ordenar por racha récord descendente
+            return sorted(lista_final, key=lambda x: x[1], reverse=True)
+
+        except Exception as e:
+            logger.error(f"Error calculando racha récord: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
     def obtener_todos_pronosticos(self):
         """
         Obtiene el listado de TODOS los pronósticos (historial completo).
