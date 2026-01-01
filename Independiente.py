@@ -352,6 +352,23 @@ class SistemaIndependiente:
             
         threading.Thread(target=_cargar, daemon=True).start()
 
+    def _seleccionar_fila_ranking(self, usuario):
+        """Maneja el clic en una fila de la tabla de estadísticas."""
+        # Si toco el mismo que ya estaba seleccionado, lo desmarco
+        if self.usuario_seleccionado_ranking == usuario:
+            self.usuario_seleccionado_ranking = None
+        else:
+            self.usuario_seleccionado_ranking = usuario
+
+        # Iterar filas para pintar la correcta
+        for row in self.tabla_estadisticas.rows:
+            if row.data == self.usuario_seleccionado_ranking:
+                row.color = "#8B0000" # Rojo oscuro
+            else:
+                row.color = None
+        
+        self.tabla_estadisticas.update()
+
     # --- PANTALLA 2: MENÚ PRINCIPAL ---
 
     def _ir_a_menu_principal(self, usuario):
@@ -394,6 +411,7 @@ class SistemaIndependiente:
         self.chk_usuarios_grafico = [] 
         self.chk_usuarios_grafico_lp = [] 
         self.usuario_grafico_barra_sel = None 
+        self.usuario_seleccionado_ranking = None
 
         # --- SELECTORES ---
         carpeta_actual = os.path.dirname(os.path.abspath(__file__))
@@ -414,8 +432,7 @@ class SistemaIndependiente:
         self.loading_admin = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
         self.loading_torneos_admin = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
         self.loading_copas = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
-        # ELIMINADO: loading_falso_profeta
-
+        
         # --- CONTENEDOR 1: FILTROS ---
         self.btn_ranking_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_torneo_ranking)
         self.btn_ranking_anio = ft.ElevatedButton("Por año", icon=ft.Icons.CALENDAR_MONTH, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_anio_ranking)
@@ -432,9 +449,16 @@ class SistemaIndependiente:
         self.btn_grafico_barras_puntos = ft.ElevatedButton("Puntos por partidos", icon=ft.Icons.BAR_CHART, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_barras)
         self.contenedor_graficos_barra = ft.Container(padding=ft.padding.all(10), border=ft.border.all(1, "white24"), border_radius=8, bgcolor="#1E1E1E", content=ft.Column(spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER, controls=[ft.Text("Gráficos de barra", size=11, weight=ft.FontWeight.BOLD, color="white54"), self.btn_grafico_barras_puntos]))
 
-        # --- CONTENEDOR 4: ÍNDICES (MODIFICADO) ---
+        # --- CONTENEDOR 4: RANKINGS (FUSIÓN ÍNDICES Y FALSO PROFETA) ---
         self.btn_indice_opt_pes = ft.ElevatedButton("Optimismo/Pesimismo", icon=ft.Icons.ASSESSMENT, bgcolor="#333333", color="white", width=180, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_opt_pes)
+        self.btn_ranking_fp = ft.ElevatedButton("Falso profeta", icon=ft.Icons.NEW_RELEASES, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_falso_profeta)
         
+        # --- NUEVO BOTÓN ANTI-MUFA ---
+        self.btn_anti_mufa = ft.ElevatedButton("Anti-mufa", icon=ft.Icons.SHIELD, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_anti_mufa)
+
+        # --- NUEVO BOTÓN MEJOR PREDICTOR ---
+        self.btn_mejor_predictor = ft.ElevatedButton("Mejor predictor", icon=ft.Icons.PRECISION_MANUFACTURING, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_mejor_predictor)
+
         self.contenedor_indices = ft.Container(
             padding=ft.padding.all(10),
             border=ft.border.all(1, "white24"),
@@ -444,26 +468,27 @@ class SistemaIndependiente:
                 spacing=10,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    ft.Text("Índices", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
-                    self.btn_indice_opt_pes
-                ]
-            )
-        )
-
-        # --- CONTENEDOR 5: RANKINGS (NUEVO) ---
-        self.btn_ranking_fp = ft.ElevatedButton("Falso profeta", icon=ft.Icons.NEW_RELEASES, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_falso_profeta)
-        
-        self.contenedor_rankings = ft.Container(
-            padding=ft.padding.all(10), 
-            border=ft.border.all(1, "white24"), 
-            border_radius=8, 
-            bgcolor="#1E1E1E", 
-            content=ft.Column(
-                spacing=10, 
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER, 
-                controls=[
                     ft.Text("Rankings", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
-                    self.btn_ranking_fp
+                    
+                    # Fila superior
+                    ft.Row(
+                        spacing=10,
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        controls=[
+                            self.btn_indice_opt_pes,
+                            self.btn_ranking_fp
+                        ]
+                    ),
+                    
+                    # Fila inferior: Anti-mufa y Mejor predictor (Alineados a la izquierda/start)
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.START,
+                        spacing=10,
+                        controls=[
+                            self.btn_anti_mufa, 
+                            self.btn_mejor_predictor # <--- Agregado aquí a la derecha
+                        ]
+                    )
                 ]
             )
         )
@@ -476,7 +501,6 @@ class SistemaIndependiente:
         # --- TÍTULOS ---
         self.txt_titulo_ranking = ft.Text("Tabla de posiciones histórica", size=28, weight=ft.FontWeight.BOLD, color="white")
         self.txt_titulo_copas = ft.Text("Torneos ganados en la historia", size=24, weight=ft.FontWeight.BOLD, color="white")
-        # ELIMINADO: txt_titulo_falso_profeta
         
         self.txt_titulo_partidos = ft.Text("Partidos por jugar", size=28, weight=ft.FontWeight.BOLD, color="white")
         self.txt_titulo_pronosticos = ft.Text("Todos los pronósticos", size=28, weight=ft.FontWeight.BOLD, color="white") 
@@ -509,7 +533,6 @@ class SistemaIndependiente:
         self.tabla_estadisticas = ft.DataTable(width=1450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
         self.tabla_copas_header = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_copas, rows=[])
         self.tabla_copas = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_copas, rows=[])
-        # ELIMINADA: tabla_falso_profeta
         
         self.tabla_partidos_header = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_partidos, rows=[])
         self.tabla_partidos = ft.DataTable(bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_partidos, rows=[])
@@ -534,23 +557,28 @@ class SistemaIndependiente:
                             self.txt_titulo_ranking, 
                             self.loading,
                             # 1. TABLA POSICIONES (SOLA)
-                            ft.Column(
-                                spacing=0,
+                            ft.Row(
+                                scroll=ft.ScrollMode.AUTO, # <--- SCROLL HORIZONTAL AGREGADO
                                 controls=[
-                                    self.tabla_estadisticas_header,
-                                    ft.Container(
-                                        height=180, 
-                                        content=ft.Column(
-                                            scroll=ft.ScrollMode.ALWAYS, 
-                                            controls=[self.tabla_estadisticas]
-                                        )
+                                    ft.Column(
+                                        spacing=0,
+                                        controls=[
+                                            self.tabla_estadisticas_header,
+                                            ft.Container(
+                                                height=180, 
+                                                content=ft.Column(
+                                                    scroll=ft.ScrollMode.ALWAYS, 
+                                                    controls=[self.tabla_estadisticas]
+                                                )
+                                            )
+                                        ]
                                     )
                                 ]
                             ),
                             
                             ft.Container(height=20), # Espacio intermedio
 
-                            # 2. FILA DE CONTENEDORES (Filtros, Gráficos, Índices, Rankings)
+                            # 2. FILA DE CONTENEDORES (Filtros, Gráficos, Rankings)
                             ft.Row(
                                 alignment=ft.MainAxisAlignment.START,
                                 vertical_alignment=ft.CrossAxisAlignment.START,
@@ -561,9 +589,7 @@ class SistemaIndependiente:
                                     ft.Container(width=20),
                                     self.contenedor_graficos_barra,
                                     ft.Container(width=20),
-                                    self.contenedor_indices,
-                                    ft.Container(width=20),
-                                    self.contenedor_rankings # <--- NUEVO CONTENEDOR
+                                    self.contenedor_indices # AHORA LLAMADO RANKINGS Y CONTIENE AMBOS BOTONES
                                 ]
                             ),
                             
@@ -582,7 +608,6 @@ class SistemaIndependiente:
                                             ft.Container(height=260, content=ft.Column(spacing=0, controls=[self.tabla_copas_header, ft.Container(height=180, content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_copas]))]))
                                         ]
                                     )
-                                    # ELIMINADA COLUMNA DERECHA (Falso Profeta)
                                 ]
                             )
                         ]
@@ -1195,6 +1220,99 @@ class SistemaIndependiente:
 
         threading.Thread(target=_tarea, daemon=True).start()
 
+    def _abrir_modal_mejor_predictor(self, e):
+        """Abre la ventana modal con la tabla de Mejor Predictor (Error Absoluto)."""
+        
+        titulo = "Ranking Mejor Predictor (Histórico)"
+        if self.filtro_ranking_nombre: 
+             titulo = f"Ranking Mejor Predictor ({self.filtro_ranking_nombre})"
+        elif self.filtro_ranking_anio:
+             titulo = f"Ranking Mejor Predictor ({self.filtro_ranking_anio})"
+             
+        self.loading_modal = ft.ProgressBar(width=200, color="amber", bgcolor="#222222")
+        
+        columna_content = ft.Column(
+            controls=[
+                ft.Text(titulo, size=18, weight="bold", color="white"),
+                ft.Container(height=10),
+                self.loading_modal,
+                ft.Container(height=50)
+            ],
+            height=150,
+            width=700, # Un poco más ancho para el título de la columna error
+            scroll=None
+        )
+        
+        self.dlg_mejor_predictor = ft.AlertDialog(content=columna_content, modal=True)
+        self.page.open(self.dlg_mejor_predictor)
+
+        def _cargar():
+            bd = BaseDeDatos()
+            datos = bd.obtener_ranking_mejor_predictor(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
+            
+            filas = []
+            for i, row in enumerate(datos, start=1):
+                # row: [0] username, [1] promedio_error (float/decimal)
+                user = row[0]
+                val = float(row[1])
+                
+                txt_val = f"{val:.2f}".replace('.', ',')
+                
+                # --- Lógica de Clasificación ---
+                if val == 0:
+                    clasificacion = "🎯 Predictor perfecto"
+                    color_val = "cyan"
+                elif val <= 1.0:
+                    clasificacion = "👌 Muy preciso"
+                    color_val = "green"
+                elif val <= 2.0:
+                    clasificacion = "👍 Aceptable"
+                    color_val = "yellow"
+                else: # > 2.0
+                    clasificacion = "🎲 Poco realista / arriesgado"
+                    color_val = "red"
+
+                filas.append(ft.DataRow(cells=[
+                    ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(user, weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
+                    ft.DataCell(ft.Container(content=ft.Text(txt_val, weight="bold", color=color_val), width=180, alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(clasificacion, weight="bold", color="white"), width=200, alignment=ft.alignment.center_left)),
+                ]))
+            
+            tabla = ft.DataTable(
+                columns=[
+                    ft.DataColumn(ft.Container(content=ft.Text("Puesto", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
+                    ft.DataColumn(ft.Container(content=ft.Text("Usuario", weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
+                    ft.DataColumn(ft.Container(content=ft.Text("Promedio error\nabsoluto de goles", text_align="center", weight="bold", color="white"), width=180, alignment=ft.alignment.center), numeric=True),
+                    ft.DataColumn(ft.Container(content=ft.Text("Clasificación", weight="bold", color="white"), width=200, alignment=ft.alignment.center_left)),
+                ],
+                rows=filas,
+                heading_row_color="black",
+                border=ft.border.all(1, "white10"),
+                column_spacing=10,
+                heading_row_height=60,
+                data_row_max_height=50,
+                data_row_min_height=50
+            )
+            
+            columna_content.height = 340
+            columna_content.width = 700
+            
+            columna_content.controls = [
+                ft.Text(titulo, size=18, weight="bold", color="white"),
+                ft.Container(height=10),
+                ft.Column(
+                    controls=[tabla],
+                    height=220,
+                    scroll=ft.ScrollMode.AUTO
+                ),
+                ft.Container(height=10),
+                ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_mejor_predictor))], alignment=ft.MainAxisAlignment.END)
+            ]
+            self.dlg_mejor_predictor.update()
+            
+        threading.Thread(target=_cargar, daemon=True).start()
+        
     def _guardar_pronostico(self, e):
         """Valida y guarda el pronóstico ingresado."""
         def _tarea():
@@ -1436,6 +1554,114 @@ class SistemaIndependiente:
         
         self.page.update()
 
+    def _abrir_modal_anti_mufa(self, e):
+        """Abre la ventana modal con la tabla Anti-mufa."""
+        
+        # Título dinámico
+        titulo = "Ranking Anti-mufa (Histórico)"
+        if self.filtro_ranking_nombre: 
+             titulo = f"Ranking Anti-mufa ({self.filtro_ranking_nombre})"
+        elif self.filtro_ranking_anio:
+             titulo = f"Ranking Anti-mufa ({self.filtro_ranking_anio})"
+             
+        self.loading_modal = ft.ProgressBar(width=200, color="amber", bgcolor="#222222")
+        
+        # Contenedor inicial
+        columna_content = ft.Column(
+            controls=[
+                ft.Text(titulo, size=18, weight="bold", color="white"),
+                ft.Container(height=10),
+                self.loading_modal,
+                ft.Container(height=50)
+            ],
+            # Ajuste dinámico de altura luego
+            height=150,
+            width=650,
+            scroll=None
+        )
+        
+        self.dlg_anti_mufa = ft.AlertDialog(content=columna_content, modal=True)
+        self.page.open(self.dlg_anti_mufa)
+
+        def _cargar():
+            bd = BaseDeDatos()
+            datos = bd.obtener_ranking_anti_mufa(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
+            
+            filas = []
+            for i, row in enumerate(datos, start=1):
+                # row: [0] username, [1] predicciones_derrota, [2] derrotas_evitadas, [3] porcentaje
+                user = row[0]
+                total_pred_derrota = row[1]
+                porcentaje = float(row[3])
+                
+                # Nombre corto solicitado: "% Anti-Mufa"
+                txt_porcentaje = f"{porcentaje:.2f} %".replace('.', ',')
+                
+                # --- Lógica de Clasificación ---
+                # Nota: Si total_pred_derrota es 0, técnicamente el porcentaje es 0
+                if porcentaje == 0:
+                    clasificacion = "😅 Mufa pura"
+                    color_val = "red"
+                elif 0 < porcentaje <= 20:
+                    clasificacion = "😐 Poco anti-mufa"
+                    color_val = "orange"
+                elif 20 < porcentaje <= 40:
+                    clasificacion = "🛡️ Anti-mufa moderado"
+                    color_val = "yellow"
+                elif 40 < porcentaje <= 60:
+                    clasificacion = "💪 Anti-mufa fuerte"
+                    color_val = "green"
+                else: # > 60
+                    clasificacion = "🔮 Amuleto viviente"
+                    color_val = "cyan"
+
+                # Si el usuario nunca pronosticó derrota, aclaramos en clasificación (opcional)
+                if total_pred_derrota == 0:
+                    clasificacion = "--- (Sin datos)"
+                    txt_porcentaje = "-"
+                    color_val = "grey"
+
+                filas.append(ft.DataRow(cells=[
+                    ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(user, weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
+                    ft.DataCell(ft.Container(content=ft.Text(txt_porcentaje, weight="bold", color=color_val), width=120, alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(clasificacion, weight="bold", color="white"), width=180, alignment=ft.alignment.center_left)),
+                ]))
+            
+            tabla = ft.DataTable(
+                columns=[
+                    ft.DataColumn(ft.Container(content=ft.Text("Puesto", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
+                    ft.DataColumn(ft.Container(content=ft.Text("Usuario", weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
+                    ft.DataColumn(ft.Container(content=ft.Text("% Anti-mufa", text_align="center", weight="bold", color="white"), width=120, alignment=ft.alignment.center), numeric=True),
+                    ft.DataColumn(ft.Container(content=ft.Text("Clasificación", weight="bold", color="white"), width=180, alignment=ft.alignment.center_left)),
+                ],
+                rows=filas,
+                heading_row_color="black",
+                border=ft.border.all(1, "white10"),
+                column_spacing=10,
+                heading_row_height=60,
+                data_row_max_height=50,
+                data_row_min_height=50
+            )
+            
+            columna_content.height = 340 # Altura ajustada
+            columna_content.width = 650
+            
+            columna_content.controls = [
+                ft.Text(titulo, size=18, weight="bold", color="white"),
+                ft.Container(height=10),
+                ft.Column(
+                    controls=[tabla],
+                    height=220,
+                    scroll=ft.ScrollMode.AUTO
+                ),
+                ft.Container(height=10),
+                ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_anti_mufa))], alignment=ft.MainAxisAlignment.END)
+            ]
+            self.dlg_anti_mufa.update()
+            
+        threading.Thread(target=_cargar, daemon=True).start()
+
     def _seleccionar_rival_admin(self, id_rival):
         """Maneja el clic en la tabla de administración de equipos (Sin Recarga de BD)."""
         self.rival_seleccionado_id = id_rival
@@ -1599,18 +1825,27 @@ class SistemaIndependiente:
                                 d = seg // 86400; seg %= 86400; h = seg // 3600; seg %= 3600; m = seg // 60; s = seg % 60
                                 txt_anticip = f"{d} días, {h} horas, {m} minutos y {s} segundos"
 
+                        # Determinar color de fila
+                        color_fila = "#8B0000" if user_name == self.usuario_seleccionado_ranking else None
+                        
+                        # Lambda para el evento on_click
+                        on_click_handler = lambda e, u=user_name: self._seleccionar_fila_ranking(u)
+
                         filas_tabla_ranking.append(ft.DataRow(cells=[
-                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center)), 
-                            ft.DataCell(ft.Container(content=ft.Text(user_name, weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=110, alignment=ft.alignment.center_left)), 
-                            ft.DataCell(ft.Container(content=ft.Text(txt_pts_total, weight=ft.FontWeight.BOLD, color="yellow", size=16), width=100, alignment=ft.alignment.center)), 
-                            ft.DataCell(ft.Container(content=ft.Text(txt_pts_ganador, color="white70"), width=120, alignment=ft.alignment.center)), 
-                            ft.DataCell(ft.Container(content=ft.Text(txt_pts_cai, color="white70"), width=120, alignment=ft.alignment.center)), 
-                            ft.DataCell(ft.Container(content=ft.Text(txt_pts_rival, color="white70"), width=120, alignment=ft.alignment.center)),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_partidos_jug, color="cyan"), width=120, alignment=ft.alignment.center)),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_anticip, color="cyan", size=12), width=200, alignment=ft.alignment.center)),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_promedio_intentos, color="cyan"), width=80, alignment=ft.alignment.center)),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center))
-                        ]))
+                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center, on_click=on_click_handler)), 
+                            ft.DataCell(ft.Container(content=ft.Text(user_name, weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=110, alignment=ft.alignment.center_left, on_click=on_click_handler)), 
+                            ft.DataCell(ft.Container(content=ft.Text(txt_pts_total, weight=ft.FontWeight.BOLD, color="yellow", size=16), width=100, alignment=ft.alignment.center, on_click=on_click_handler)), 
+                            ft.DataCell(ft.Container(content=ft.Text(txt_pts_ganador, color="white70"), width=120, alignment=ft.alignment.center, on_click=on_click_handler)), 
+                            ft.DataCell(ft.Container(content=ft.Text(txt_pts_cai, color="white70"), width=120, alignment=ft.alignment.center, on_click=on_click_handler)), 
+                            ft.DataCell(ft.Container(content=ft.Text(txt_pts_rival, color="white70"), width=120, alignment=ft.alignment.center, on_click=on_click_handler)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_partidos_jug, color="cyan"), width=120, alignment=ft.alignment.center, on_click=on_click_handler)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_anticip, color="cyan", size=12), width=200, alignment=ft.alignment.center, on_click=on_click_handler)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_promedio_intentos, color="cyan"), width=80, alignment=ft.alignment.center, on_click=on_click_handler)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center, on_click=on_click_handler))
+                        ],
+                        data=user_name, # Guardamos el ID (nombre usuario) en la fila
+                        color=color_fila # Aplicamos color si ya estaba seleccionado
+                        ))
                     self.tabla_estadisticas.rows = filas_tabla_ranking
                     
                     # ELIMINADO: 0.B Falso Profeta (Ahora es modal)
@@ -1788,7 +2023,6 @@ class SistemaIndependiente:
                 self.page.update()
 
         threading.Thread(target=_tarea_en_segundo_plano, daemon=True).start()
-
 
     def _abrir_selector_torneo(self, e):
         """Abre el modal para filtrar la tabla de PARTIDOS por torneo."""

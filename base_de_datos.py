@@ -968,6 +968,140 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
+    def obtener_ranking_anti_mufa(self, edicion_id=None, anio=None):
+        """
+        Calcula el porcentaje Anti-mufa.
+        CAMBIO: Se usa INNER JOIN para excluir usuarios que nunca pronosticaron derrota.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            params = []
+            filtro_sql = ""
+
+            if edicion_id is not None:
+                filtro_sql = " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql = " AND a.numero = %s "
+                params.append(anio)
+
+            sql = f"""
+            SELECT 
+                u.username,
+                stats.predicciones_derrota,
+                stats.derrotas_evitadas,
+                stats.porcentaje_anti_mufa
+            FROM usuarios u
+            INNER JOIN (  -- CAMBIO: INNER JOIN excluye a los que no están en esta subconsulta
+                SELECT 
+                    pr.usuario_id,
+                    COUNT(*) as predicciones_derrota,
+                    SUM(CASE WHEN p.goles_independiente >= p.goles_rival THEN 1 ELSE 0 END) as derrotas_evitadas,
+                    (SUM(CASE WHEN p.goles_independiente >= p.goles_rival THEN 1 ELSE 0 END) / COUNT(*)) * 100 as porcentaje_anti_mufa
+                FROM pronosticos pr
+                INNER JOIN (
+                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    GROUP BY usuario_id, partido_id
+                ) p2 ON pr.usuario_id = p2.usuario_id 
+                    AND pr.partido_id = p2.partido_id 
+                    AND pr.fecha_prediccion = p2.max_fecha
+                JOIN partidos p ON pr.partido_id = p.id
+                JOIN ediciones e ON p.edicion_id = e.id
+                JOIN anios a ON e.anio_id = a.id
+                WHERE 
+                    p.goles_independiente IS NOT NULL
+                    AND pr.pred_goles_independiente < pr.pred_goles_rival -- FILTRO: Solo derrotas pronosticadas
+                    {filtro_sql}
+                GROUP BY pr.usuario_id
+            ) stats ON u.id = stats.usuario_id
+            
+            ORDER BY 
+                stats.porcentaje_anti_mufa DESC, 
+                stats.predicciones_derrota DESC,
+                u.username ASC
+            """
+            
+            cursor.execute(sql, tuple(params))
+            return cursor.fetchall()
+
+        except Exception as e:
+            logger.error(f"Error calculando ranking anti-mufa: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def obtener_ranking_falso_profeta(self, edicion_id=None, anio=None):
+        """
+        Ranking de Falso Profeta.
+        CAMBIO: Se usa INNER JOIN para excluir usuarios que nunca pronosticaron victoria.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            params = []
+            filtro_sql = ""
+
+            if edicion_id is not None:
+                filtro_sql = " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql = " AND a.numero = %s "
+                params.append(anio)
+
+            sql = f"""
+            SELECT 
+                u.username,
+                stats.victorias_pronosticadas,
+                stats.porcentaje_acierto
+            FROM usuarios u
+            INNER JOIN ( -- CAMBIO: INNER JOIN excluye a los que no están en esta subconsulta
+                SELECT 
+                    pr.usuario_id,
+                    COUNT(*) as victorias_pronosticadas,
+                    (SUM(CASE WHEN p.goles_independiente > p.goles_rival THEN 1 ELSE 0 END) / COUNT(*)) * 100 as porcentaje_acierto
+                FROM pronosticos pr
+                INNER JOIN (
+                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    GROUP BY usuario_id, partido_id
+                ) p2 ON pr.usuario_id = p2.usuario_id 
+                    AND pr.partido_id = p2.partido_id 
+                    AND pr.fecha_prediccion = p2.max_fecha
+                JOIN partidos p ON pr.partido_id = p.id
+                JOIN ediciones e ON p.edicion_id = e.id
+                JOIN anios a ON e.anio_id = a.id
+                WHERE 
+                    p.goles_independiente IS NOT NULL
+                    AND pr.pred_goles_independiente > pr.pred_goles_rival -- FILTRO: Solo victorias pronosticadas
+                    {filtro_sql}
+                GROUP BY pr.usuario_id
+            ) stats ON u.id = stats.usuario_id
+            
+            ORDER BY 
+                stats.porcentaje_acierto ASC, 
+                stats.victorias_pronosticadas DESC,
+                u.username ASC
+            """
+            
+            cursor.execute(sql, tuple(params))
+            return cursor.fetchall()
+
+        except Exception as e:
+            logger.error(f"Error calculando ranking falso profeta: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()  
+
     def obtener_ranking(self, edicion_id=None, anio=None):
         """
         Calcula el ranking incluyendo efectividad y ahora devuelve también el 
@@ -1176,14 +1310,12 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-
-    def obtener_ranking_falso_profeta(self, edicion_id=None, anio=None):
+    
+    def obtener_ranking_mejor_predictor(self, edicion_id=None, anio=None):
         """
-        Ranking de Falso Profeta REVISADO:
-        - Victorias Pronosticadas: Cuántas veces dijo que ganaba CAI.
-        - Porcentaje Acierto: Cuántas de esas veces realmente ganó CAI.
-        - Orden: Ascendente por porcentaje (0% = El mayor falso profeta).
-        - Muestra TODOS los usuarios.
+        Calcula el Ranking de Mejor Predictor basado en el Error Absoluto de Goles.
+        Fórmula por partido: |G_Real_CAI - G_Pred_CAI| + |G_Real_Rival - G_Pred_Rival|
+        El ranking se ordena por el PROMEDIO de ese error (ASCENDENTE, menor es mejor).
         """
         conexion = None
         cursor = None
@@ -1204,20 +1336,19 @@ class BaseDeDatos:
             sql = f"""
             SELECT 
                 u.username,
-                COALESCE(stats.victorias_pronosticadas, 0) as victorias_pronosticadas,
-                COALESCE(stats.porcentaje_acierto, 0) as porcentaje_acierto
+                stats.promedio_error
             FROM usuarios u
-            LEFT JOIN (
+            INNER JOIN (
                 SELECT 
                     pr.usuario_id,
-                    -- Total predicciones de victoria
-                    COUNT(*) as victorias_pronosticadas,
-                    
-                    -- Porcentaje: (Veces que realmente ganó / Total predicciones victoria) * 100
-                    (SUM(CASE WHEN p.goles_independiente > p.goles_rival THEN 1 ELSE 0 END) / COUNT(*)) * 100 as porcentaje_acierto
-                    
+                    -- Calculamos el promedio del error absoluto sumado de ambos equipos
+                    AVG(
+                        ABS(CAST(p.goles_independiente AS SIGNED) - CAST(pr.pred_goles_independiente AS SIGNED)) + 
+                        ABS(CAST(p.goles_rival AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED))
+                    ) as promedio_error
                 FROM pronosticos pr
                 INNER JOIN (
+                    -- Solo el último pronóstico por partido
                     SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
                     FROM pronosticos
                     GROUP BY usuario_id, partido_id
@@ -1228,17 +1359,13 @@ class BaseDeDatos:
                 JOIN ediciones e ON p.edicion_id = e.id
                 JOIN anios a ON e.anio_id = a.id
                 WHERE 
-                    p.goles_independiente IS NOT NULL
-                    AND pr.pred_goles_independiente > pr.pred_goles_rival -- FILTRO: Solo predicciones de VICTORIA
+                    p.goles_independiente IS NOT NULL -- Solo partidos jugados
                     {filtro_sql}
                 GROUP BY pr.usuario_id
             ) stats ON u.id = stats.usuario_id
             
             ORDER BY 
-                -- Ordenar por porcentaje ascendente (0 primero)
-                -- Pero si tiene 0 predicciones (victorias_pronosticadas = 0), lo mandamos al fondo
-                CASE WHEN COALESCE(stats.victorias_pronosticadas, 0) = 0 THEN 1 ELSE 0 END,
-                porcentaje_acierto ASC, 
+                stats.promedio_error ASC, -- Menor error es mejor
                 u.username ASC
             """
             
@@ -1246,12 +1373,12 @@ class BaseDeDatos:
             return cursor.fetchall()
 
         except Exception as e:
-            logger.error(f"Error calculando ranking falso profeta: {e}")
+            logger.error(f"Error calculando ranking mejor predictor: {e}")
             return []
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-                 
+            
     def validar_usuario(self, username, password):
         conexion = None
         cursor = None
