@@ -829,11 +829,118 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
+    
+    def obtener_racha_actual(self, edicion_id=None, anio=None):
+        """
+        Calcula la racha actual (partidos consecutivos sumando puntos) de cada usuario.
+        Ordenado por racha descendente.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
 
+            params = []
+            filtro_sql = ""
+
+            if edicion_id is not None:
+                filtro_sql = " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql = " AND a.numero = %s "
+                params.append(anio)
+
+            # Query: Cruce de Usuarios x Partidos Jugados (LEFT JOIN Pronósticos)
+            # Ordenado por Usuario y Fecha DESC (para ver los últimos primero)
+            sql = f"""
+            SELECT 
+                u.username,
+                p.fecha_hora,
+                CASE 
+                    WHEN pr.pred_goles_independiente IS NULL THEN 0 -- No pronosticó = 0 pts
+                    ELSE
+                        (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
+                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
+                END as puntos
+            FROM usuarios u
+            CROSS JOIN partidos p 
+            JOIN ediciones e ON p.edicion_id = e.id
+            JOIN anios a ON e.anio_id = a.id
+            LEFT JOIN (
+                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
+                FROM pronosticos p1
+                INNER JOIN (
+                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    GROUP BY usuario_id, partido_id
+                ) p2 ON p1.usuario_id = p2.usuario_id 
+                    AND p1.partido_id = p2.partido_id 
+                    AND p1.fecha_prediccion = p2.max_fecha
+            ) pr ON u.id = pr.usuario_id AND p.id = pr.partido_id
+            WHERE 
+                p.goles_independiente IS NOT NULL -- Solo partidos jugados
+                {filtro_sql}
+            ORDER BY u.username ASC, p.fecha_hora DESC
+            """
+            
+            cursor.execute(sql, tuple(params))
+            resultados = cursor.fetchall()
+            
+            # --- Lógica en Python para calcular racha ---
+            rachas = []
+            
+            if resultados:
+                usuario_actual = None
+                racha_actual = 0
+                racha_activa = True # Bandera para saber si seguimos contando hacia atrás
+                
+                for row in resultados:
+                    user = row[0]
+                    puntos = row[2]
+                    
+                    if user != usuario_actual:
+                        # Guardamos el anterior si existe
+                        if usuario_actual is not None:
+                            rachas.append((usuario_actual, racha_actual))
+                        
+                        # Nuevo usuario
+                        usuario_actual = user
+                        racha_actual = 0
+                        racha_activa = True
+                        
+                        # Evaluamos el primer partido (el más reciente)
+                        if puntos > 0:
+                            racha_actual += 1
+                        else:
+                            racha_activa = False # Cortó racha en el último partido
+                    else:
+                        # Mismo usuario, partido anterior
+                        if racha_activa:
+                            if puntos > 0:
+                                racha_actual += 1
+                            else:
+                                racha_activa = False # Fin de la racha
+                
+                # Guardar el último
+                if usuario_actual is not None:
+                    rachas.append((usuario_actual, racha_actual))
+
+            # Ordenar por racha descendente
+            return sorted(rachas, key=lambda x: x[1], reverse=True)
+
+        except Exception as e:
+            logger.error(f"Error calculando racha actual: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+            
     def obtener_todos_pronosticos(self):
         """
         Obtiene el listado de TODOS los pronósticos (historial completo).
-        Incluye la fecha en la que se realizó la predicción.
+        Incluye cálculo de Error Absoluto en el índice 10.
         """
         conexion = None
         cursor = None
@@ -859,8 +966,14 @@ class BaseDeDatos:
                         (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
                 END as puntos,
-                pr.fecha_prediccion  -- [NUEVO CAMPO: Índice 9]
-            FROM pronosticos pr  -- JOIN Directo (Trae todos los registros)
+                pr.fecha_prediccion,
+                
+                -- [NUEVO CAMPO: Índice 10] ERROR ABSOLUTO
+                -- Formula: |Real_CAI - Pred_CAI| + |Real_Rival - Pred_Rival|
+                ABS(CAST(p.goles_independiente AS SIGNED) - CAST(pr.pred_goles_independiente AS SIGNED)) + 
+                ABS(CAST(p.goles_rival AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) as error_absoluto
+
+            FROM pronosticos pr  
             JOIN partidos p ON pr.partido_id = p.id
             JOIN usuarios u ON pr.usuario_id = u.id
             JOIN rivales r ON p.rival_id = r.id
@@ -877,7 +990,7 @@ class BaseDeDatos:
             return []
         finally:
             if cursor: cursor.close()
-            if conexion: conexion.close() 
+            if conexion: conexion.close()
 
     def obtener_ediciones(self):
         """
@@ -1378,7 +1491,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-            
+
     def validar_usuario(self, username, password):
         conexion = None
         cursor = None
