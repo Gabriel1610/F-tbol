@@ -95,6 +95,27 @@ class SistemaIndependiente:
             jugados.sort(key=lambda x: x['fecha'], reverse=True)
             por_jugar.sort(key=lambda x: x['fecha'], reverse=False)
             
+            # --- NUEVA LÓGICA: REGLA DE 21:00 H (PLACEHOLDER) ---
+            ahora = datetime.now()
+            
+            for i, p in enumerate(por_jugar):
+                fecha = p['fecha']
+                
+                # Verificamos si la hora es exactamente 21:00:00
+                if fecha.hour == 21 and fecha.minute == 0 and fecha.second == 0:
+                    
+                    # Condición 1: NO está en los próximos 3 partidos (índices 0, 1, 2 son los próximos)
+                    no_es_proximo = (i >= 3)
+                    
+                    # Condición 2: Faltan más de 7 días
+                    dias_faltantes = (fecha - ahora).days
+                    es_lejano = (dias_faltantes > 7)
+                    
+                    if no_es_proximo or es_lejano:
+                        # Cumple ambas condiciones: Es un placeholder -> Guardar como 00:00:00
+                        p['fecha'] = fecha.replace(hour=0, minute=0, second=0, microsecond=0)
+                        # print(f"DEBUG: Partido vs {p['rival']} marcado como S/H (Indice {i}, faltan {dias_faltantes} días)")
+
             # --- 1. ACTUALIZACIÓN DE PARTIDOS ---
             if jugados:
                 print(f"Procesando {len(jugados)} partidos jugados...")
@@ -820,9 +841,9 @@ class SistemaIndependiente:
             # Validación inicial de tipo
             if not isinstance(match, dict): return None
 
-            # 1. FECHA
+            # 1. FECHA Y STATUS
             status = match.get("status", {})
-            if not isinstance(status, dict): return None # Seguridad extra
+            if not isinstance(status, dict): return None 
             
             fecha_str = status.get("utcTime")
             if not fecha_str: return None
@@ -834,6 +855,35 @@ class SistemaIndependiente:
             except ValueError:
                 return None
 
+            # --- DETECCIÓN DE HORARIO NO DEFINIDO (TEXTUAL) ---
+            # Solo marcamos TBD si la API lo dice explícitamente con texto o flags.
+            # La lógica de las 21:00 h se hará después, según el orden de los partidos.
+            
+            status_short = str(status.get("short", "")).lower()
+            status_long = str(status.get("long", "")).lower()
+            reason_short = str(status.get("reason", {}).get("short", "")).lower()
+            reason_long = str(status.get("reason", {}).get("long", "")).lower()
+            
+            senales_tbd = [
+                "tbd", "tbc", "to be defined", "time to be defined", 
+                "postponed", "time tbd", "time tbc", "pending", 
+                "awarded"
+            ]
+            
+            is_time_defined = match.get("isTimeDefined", True)
+
+            es_horario_tbd = (
+                not is_time_defined or 
+                status_short in senales_tbd or 
+                reason_short in senales_tbd or
+                any(senal in status_long for senal in senales_tbd) or
+                any(senal in reason_long for senal in senales_tbd)
+            )
+
+            if es_horario_tbd:
+                # Si es explícitamente TBD, forzamos las 00:00:00
+                fecha_dt = fecha_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            
             # 2. EQUIPOS
             home = match.get("home", {})
             away = match.get("away", {})
@@ -888,7 +938,7 @@ class SistemaIndependiente:
 
         except Exception as e:
             print(f"Error procesando item individual: {e}")
-            return None 
+            return None
 
     def _ordenar_tabla_pronosticos(self, e):
         """Maneja el evento de ordenar columnas en la tabla de pronósticos"""
