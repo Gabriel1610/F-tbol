@@ -671,7 +671,88 @@ class SistemaIndependiente:
                 )
             ),
             # ... (Resto de pestañas) ...
-            ft.Tab(text="Partidos", icon="sports_soccer", content=ft.Container(content=ft.Column(controls=[self.txt_titulo_partidos, self.loading_partidos, ft.Row(vertical_alignment=ft.CrossAxisAlignment.START, controls=[ft.Container(height=380, content=ft.Row(controls=[ft.Column(spacing=0, controls=[self.tabla_partidos_header, ft.Container(height=310, content=ft.Column(controls=[self.tabla_partidos], scroll=ft.ScrollMode.ALWAYS))])], scroll=ft.ScrollMode.ALWAYS)), ft.Container(width=10), ft.Container(width=200, padding=10, border=ft.border.all(1, "white10"), border_radius=8, bgcolor="#1E1E1E", content=ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=15, controls=[ft.Text("Tu Pronóstico", size=16, weight=ft.FontWeight.BOLD), self.input_pred_cai, self.input_pred_rival, self.btn_pronosticar]))]), ft.Container(height=10), ft.Row(controls=[self.btn_todos, self.btn_jugados, self.btn_por_jugar, self.btn_por_torneo, self.btn_sin_pronosticar, self.btn_por_equipo], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER)], scroll=ft.ScrollMode.AUTO, horizontal_alignment=ft.CrossAxisAlignment.START), padding=20, alignment=ft.alignment.top_left)),
+            ft.Tab(
+                text="Partidos", 
+                icon="sports_soccer", 
+                content=ft.Container(
+                    content=ft.Column(
+                        controls=[
+                            self.txt_titulo_partidos, 
+                            self.loading_partidos, 
+                            
+                            # --- CAMBIO: Barra Horizontal General ---
+                            ft.Row(
+                                scroll=ft.ScrollMode.ALWAYS, # <--- ESTO AGREGA LA BARRA DE DESPLAZAMIENTO
+                                controls=[
+                                    # Contenedor que agrupa Tabla + Panel de Pronóstico
+                                    ft.Row(
+                                        vertical_alignment=ft.CrossAxisAlignment.START, 
+                                        controls=[
+                                            # 1. La Tabla de Partidos
+                                            ft.Container(
+                                                height=380, 
+                                                content=ft.Row(
+                                                    controls=[
+                                                        ft.Column(
+                                                            spacing=0, 
+                                                            controls=[
+                                                                self.tabla_partidos_header, 
+                                                                ft.Container(
+                                                                    height=310, 
+                                                                    content=ft.Column(
+                                                                        controls=[self.tabla_partidos], 
+                                                                        scroll=ft.ScrollMode.ALWAYS
+                                                                    )
+                                                                )
+                                                            ]
+                                                        )
+                                                    ], 
+                                                    scroll=ft.ScrollMode.ALWAYS # Scroll interno de la tabla
+                                                )
+                                            ), 
+                                            
+                                            ft.Container(width=10), 
+                                            
+                                            # 2. Panel de "Tu Pronóstico"
+                                            ft.Container(
+                                                width=200, 
+                                                padding=10, 
+                                                border=ft.border.all(1, "white10"), 
+                                                border_radius=8, 
+                                                bgcolor="#1E1E1E", 
+                                                content=ft.Column(
+                                                    horizontal_alignment=ft.CrossAxisAlignment.CENTER, 
+                                                    spacing=15, 
+                                                    controls=[
+                                                        ft.Text("Tu Pronóstico", size=16, weight=ft.FontWeight.BOLD), 
+                                                        self.input_pred_cai, 
+                                                        self.input_pred_rival, 
+                                                        self.btn_pronosticar
+                                                    ]
+                                                )
+                                            )
+                                        ]
+                                    )
+                                ]
+                            ),
+                            # ----------------------------------------
+
+                            ft.Container(height=10), 
+                            
+                            # Botones de Filtro
+                            ft.Row(
+                                controls=[self.btn_todos, self.btn_jugados, self.btn_por_jugar, self.btn_por_torneo, self.btn_sin_pronosticar, self.btn_por_equipo], 
+                                alignment=ft.MainAxisAlignment.START, 
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER
+                            )
+                        ], 
+                        scroll=ft.ScrollMode.AUTO, 
+                        horizontal_alignment=ft.CrossAxisAlignment.START
+                    ), 
+                    padding=20, 
+                    alignment=ft.alignment.top_left
+                )
+            ),
             ft.Tab(
                 text="Pronósticos", 
                 icon="list_alt", 
@@ -1489,7 +1570,7 @@ class SistemaIndependiente:
     def _abrir_modal_racha_actual(self, e):
         """Abre la ventana modal con la Racha Actual."""
         
-        # Título dinámico
+        # Título dinámico según filtro
         if self.filtro_ranking_nombre: 
              titulo = f"Racha actual ({self.filtro_ranking_nombre})"
         elif self.filtro_ranking_anio:
@@ -1499,13 +1580,12 @@ class SistemaIndependiente:
              
         self.loading_modal = ft.ProgressBar(width=200, color="amber", bgcolor="#222222")
         
-        # Altura ajustada para encabezado + aprox 3 filas
         columna_content = ft.Column(
             controls=[
                 ft.Text(titulo, size=18, weight="bold", color="white"),
                 ft.Container(height=10),
                 self.loading_modal,
-                ft.Container(height=20) # Espacio pequeño
+                ft.Container(height=20)
             ],
             height=150,
             width=500,
@@ -1525,10 +1605,11 @@ class SistemaIndependiente:
                 user = row[0]
                 racha = row[1]
                 
+                # Colorimetría
                 color_racha = "white"
-                if racha >= 5: color_racha = "cyan"
-                elif racha >= 3: color_racha = "green"
-                elif racha == 0: color_racha = "red"
+                if racha >= 5: color_racha = "cyan"     # Racha excelente
+                elif racha >= 3: color_racha = "green"  # Racha buena
+                elif racha == 0: color_racha = "red"    # Sin racha
 
                 filas.append(ft.DataRow(cells=[
                     ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
@@ -1551,8 +1632,7 @@ class SistemaIndependiente:
                 data_row_min_height=50
             )
             
-            # Ajustamos el tamaño para que muestre encabezado + ~3 filas + botón cerrar
-            # Altura tabla aprox: 60 (header) + 3*50 (filas) = 210
+            # Ajuste de tamaño para mostrar datos + botón cerrar
             columna_content.height = 360
             columna_content.width = 500
             
@@ -1561,7 +1641,7 @@ class SistemaIndependiente:
                 ft.Container(height=10),
                 ft.Column(
                     controls=[tabla],
-                    height=220, # Altura visible de la tabla
+                    height=220,
                     scroll=ft.ScrollMode.AUTO
                 ),
                 ft.Container(height=10),

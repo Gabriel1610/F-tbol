@@ -837,8 +837,8 @@ class BaseDeDatos:
     
     def obtener_racha_actual(self, edicion_id=None, anio=None):
         """
-        Calcula la racha actual (partidos consecutivos sumando puntos) de cada usuario.
-        Ordenado por racha descendente.
+        Calcula la racha actual (partidos consecutivos sumando puntos).
+        Si el torneo finalizó, calcula la racha con la que el usuario terminó el torneo.
         """
         conexion = None
         cursor = None
@@ -856,14 +856,16 @@ class BaseDeDatos:
                 filtro_sql = " AND a.numero = %s "
                 params.append(anio)
 
-            # Query: Cruce de Usuarios x Partidos Jugados (LEFT JOIN Pronósticos)
-            # Ordenado por Usuario y Fecha DESC (para ver los últimos primero)
+            # Lógica:
+            # 1. Obtenemos TODOS los partidos jugados (goles no nulos) del filtro.
+            # 2. Cruzamos con Usuarios para evaluar partido a partido.
+            # 3. Ordenamos por Fecha DESC (Del último partido jugado hacia atrás).
             sql = f"""
             SELECT 
                 u.username,
                 p.fecha_hora,
                 CASE 
-                    WHEN pr.pred_goles_independiente IS NULL THEN 0 -- No pronosticó = 0 pts
+                    WHEN pr.pred_goles_independiente IS NULL THEN 0 -- Si no pronosticó, rompe racha
                     ELSE
                         (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
@@ -885,7 +887,7 @@ class BaseDeDatos:
                     AND p1.fecha_prediccion = p2.max_fecha
             ) pr ON u.id = pr.usuario_id AND p.id = pr.partido_id
             WHERE 
-                p.goles_independiente IS NOT NULL -- Solo partidos jugados
+                p.goles_independiente IS NOT NULL -- Solo partidos que ya se jugaron
                 {filtro_sql}
             ORDER BY u.username ASC, p.fecha_hora DESC
             """
@@ -893,46 +895,46 @@ class BaseDeDatos:
             cursor.execute(sql, tuple(params))
             resultados = cursor.fetchall()
             
-            # --- Lógica en Python para calcular racha ---
+            # --- Cálculo de Racha ---
             rachas = []
             
             if resultados:
                 usuario_actual = None
                 racha_actual = 0
-                racha_activa = True # Bandera para saber si seguimos contando hacia atrás
+                racha_activa = True 
                 
                 for row in resultados:
                     user = row[0]
                     puntos = row[2]
                     
                     if user != usuario_actual:
-                        # Guardamos el anterior si existe
+                        # Guardar racha del usuario anterior
                         if usuario_actual is not None:
                             rachas.append((usuario_actual, racha_actual))
                         
-                        # Nuevo usuario
+                        # Iniciar nuevo usuario
                         usuario_actual = user
                         racha_actual = 0
                         racha_activa = True
                         
-                        # Evaluamos el primer partido (el más reciente)
+                        # Evaluamos el partido MÁS RECIENTE del filtro
                         if puntos > 0:
                             racha_actual += 1
                         else:
-                            racha_activa = False # Cortó racha en el último partido
+                            racha_activa = False # Si falló el último, racha actual es 0
                     else:
-                        # Mismo usuario, partido anterior
+                        # Partidos anteriores (hacia atrás en el tiempo)
                         if racha_activa:
                             if puntos > 0:
                                 racha_actual += 1
                             else:
-                                racha_activa = False # Fin de la racha
+                                racha_activa = False # Se cortó la racha aquí
                 
-                # Guardar el último
+                # Guardar el último usuario del loop
                 if usuario_actual is not None:
                     rachas.append((usuario_actual, racha_actual))
 
-            # Ordenar por racha descendente
+            # Ordenar por quien tiene la racha activa más larga
             return sorted(rachas, key=lambda x: x[1], reverse=True)
 
         except Exception as e:
@@ -941,7 +943,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-        
+               
     def obtener_racha_record(self, edicion_id=None, anio=None):
         """
         Calcula la MEJOR racha (récord) de partidos consecutivos sumando puntos en la historia (o filtro).
