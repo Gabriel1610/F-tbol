@@ -3,3 +3,4 @@
 Independiente.exe
 Independiente.spec
 /__pycache__/
+/venv/*

@@ -1,6 +1,6 @@
 import mysql.connector
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 import os # IMPORTANTE: Para encontrar el certificado
 from mysql.connector import errorcode
@@ -109,9 +109,11 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    def insertar_usuario(self, username, password):
+    # --- REEMPLAZAR ESTA FUNCIÓN ---
+    def insertar_usuario(self, username, password, email):
         """
-        Hashea la contraseña con Argon2 y guarda fecha local del sistema.
+        Inserta usuario con email. 
+        Se asume que la validación del código ya se hizo en el frontend antes de llamar a esto.
         """
         conexion = None
         cursor = None
@@ -119,38 +121,140 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            # Hashing
             password_hash = self.ph.hash(password)
-
-            # Obtenemos la hora actual de TU sistema (Argentina)
             fecha_actual = datetime.now()
 
-            # Modificamos la consulta para incluir fecha_registro explícitamente
-            sql = "INSERT INTO usuarios (username, password, fecha_registro) VALUES (%s, %s, %s)"
-            
-            # Pasamos fecha_actual como tercer valor
-            valores = (username, password_hash, fecha_actual)
+            # AHORA INCLUIMOS EL EMAIL
+            sql = "INSERT INTO usuarios (username, password, email, fecha_registro) VALUES (%s, %s, %s, %s)"
+            valores = (username, password_hash, email, fecha_actual)
 
             cursor.execute(sql, valores)
             conexion.commit()
             
-            logger.info(f"Usuario '{username}' registrado exitosamente el {fecha_actual}.")
+            logger.info(f"Usuario '{username}' registrado exitosamente.")
             return True
 
         except mysql.connector.IntegrityError as err:
             if err.errno == 1062: 
-                logger.warning(f"Intento de registro duplicado para: {username}")
-                raise Exception("El nombre de usuario ya existe. Por favor elija otro.")
+                raise Exception("El nombre de usuario o el correo ya están registrados.")
             else:
-                raise Exception(f"Error de integridad en datos: {err}")
+                raise Exception(f"Error de integridad: {err}")
+        except Exception as e:
+            raise e
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
 
-        except mysql.connector.Error as err:
-            logger.error(f"Error de base de datos: {err}")
-            raise Exception("Ocurrió un error interno al intentar guardar los datos.")
+    # --- AGREGAR ESTAS FUNCIONES NUEVAS AL FINAL DE LA CLASE ---
+
+    def verificar_disponibilidad(self, username, email):
+        """Verifica si el usuario o el email ya existen antes de enviar el código."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            
+            sql = "SELECT username, email FROM usuarios WHERE username = %s OR email = %s"
+            cursor.execute(sql, (username, email))
+            resultado = cursor.fetchone()
+            
+            if resultado:
+                # Si encontró algo, devolvemos qué fue lo que encontró para dar un error preciso
+                encontrado_user = resultado[0]
+                encontrado_email = resultado[1]
+                if encontrado_user == username:
+                    raise Exception("El nombre de usuario ya está en uso.")
+                if encontrado_email == email:
+                    raise Exception("El correo electrónico ya está registrado.")
+            return True # Está disponible
             
         except Exception as e:
             raise e
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def obtener_email_usuario(self, username):
+        """Obtiene el email de un usuario para la recuperación."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            sql = "SELECT email FROM usuarios WHERE username = %s"
+            cursor.execute(sql, (username,))
+            res = cursor.fetchone()
+            if res:
+                return res[0]
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def guardar_token_recuperacion(self, username, token):
+        """Guarda el código de recuperación en la BD con 15 min de validez."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
             
+            # Calculamos expiración (Ahora + 15 minutos)
+            expiracion = datetime.now() + timedelta(minutes=15)
+            
+            sql = "UPDATE usuarios SET token_recuperacion = %s, token_expiracion = %s WHERE username = %s"
+            cursor.execute(sql, (token, expiracion, username))
+            conexion.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error guardando token: {e}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def validar_token_recuperacion(self, username, token):
+        """Verifica si el token coincide y no ha expirado."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            
+            sql = "SELECT token_expiracion FROM usuarios WHERE username = %s AND token_recuperacion = %s"
+            cursor.execute(sql, (username, token))
+            res = cursor.fetchone()
+            
+            if res:
+                expiracion = res[0]
+                if expiracion and expiracion > datetime.now():
+                    return True # Válido
+                else:
+                    raise Exception("El código ha expirado.")
+            else:
+                raise Exception("Código incorrecto.")
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def cambiar_contrasena(self, username, nueva_password):
+        """Actualiza la contraseña y limpia el token."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            
+            password_hash = self.ph.hash(nueva_password)
+            
+            # Actualizamos pass y borramos el token usado
+            sql = "UPDATE usuarios SET password = %s, token_recuperacion = NULL, token_expiracion = NULL WHERE username = %s"
+            cursor.execute(sql, (password_hash, username))
+            conexion.commit()
+            return True
+        except Exception as e:
+            raise e
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
@@ -343,10 +447,13 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    def obtener_partidos(self, usuario, filtro='todos', edicion_id=None, rival_id=None):
+    def obtener_partidos(self, usuario, filtro_tiempo='futuros', edicion_id=None, rival_id=None, solo_sin_pronosticar=False):
         """
-        Obtiene la lista de partidos filtrada y ordenada.
-        Incluye cálculo de Error Absoluto en el índice 11.
+        Obtiene la lista de partidos aplicando filtros acumulativos.
+        - filtro_tiempo: 'todos', 'futuros', 'jugados'
+        - edicion_id: ID del torneo (opcional)
+        - rival_id: ID del equipo (opcional)
+        - solo_sin_pronosticar: Booleano
         """
         conexion = None
         cursor = None
@@ -354,29 +461,39 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
 
-            filtro_sql = ""
-            orden_sql = "DESC" 
-            
-            # Parametros base para la query
+            # Parametros base para las subconsultas de usuario
             params = [usuario, usuario]
+            
+            # Lista de condiciones WHERE. Arrancamos con 1=1 para concatenar con AND
+            condiciones = ["1=1"]
 
-            if filtro == 'futuros':
-                filtro_sql = "WHERE p.fecha_hora > NOW()"
+            # 1. Filtro de Tiempo (Excluyente entre sí)
+            if filtro_tiempo == 'futuros':
+                condiciones.append("p.fecha_hora > NOW()")
                 orden_sql = "ASC"
-            elif filtro == 'jugados':
-                filtro_sql = "WHERE p.fecha_hora <= NOW()"
+            elif filtro_tiempo == 'jugados':
+                condiciones.append("p.fecha_hora <= NOW()")
                 orden_sql = "DESC"
-            elif filtro == 'sin_pronosticar':
-                filtro_sql = "WHERE p.fecha_hora > NOW() AND pr.pred_goles_independiente IS NULL"
-                orden_sql = "ASC"
-            elif filtro == 'torneo' and edicion_id is not None:
-                filtro_sql = "WHERE p.edicion_id = %s"
-                orden_sql = "ASC"
+            else: # 'todos'
+                orden_sql = "ASC" if filtro_tiempo == 'futuros' else "DESC"
+
+            # 2. Filtro Torneo (Acumulativo)
+            if edicion_id is not None:
+                condiciones.append("p.edicion_id = %s")
                 params.append(edicion_id)
-            elif filtro == 'equipo' and rival_id is not None:
-                filtro_sql = "WHERE p.rival_id = %s"
-                orden_sql = "DESC"
+
+            # 3. Filtro Equipo (Acumulativo)
+            if rival_id is not None:
+                condiciones.append("p.rival_id = %s")
                 params.append(rival_id)
+
+            # 4. Filtro Sin Pronosticar (Acumulativo)
+            if solo_sin_pronosticar:
+                condiciones.append("p.fecha_hora > NOW()") # Redundancia de seguridad
+                condiciones.append("pr.pred_goles_independiente IS NULL")
+
+            # Unir condiciones
+            where_clause = " WHERE " + " AND ".join(condiciones)
 
             sql = f"""
             SELECT 
@@ -403,7 +520,7 @@ class BaseDeDatos:
                         (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
                 END as tus_puntos,
                 
-                -- [NUEVO CAMPO: Índice 11] ERROR ABSOLUTO
+                -- ERROR ABSOLUTO
                 CASE 
                     WHEN p.goles_independiente IS NULL OR pr.pred_goles_independiente IS NULL THEN NULL
                     ELSE
@@ -431,7 +548,7 @@ class BaseDeDatos:
                 WHERE p1.usuario_id = (SELECT id FROM usuarios WHERE username = %s)
             ) pr ON p.id = pr.partido_id
             
-            {filtro_sql}
+            {where_clause}
             ORDER BY p.fecha_hora {orden_sql}
             """
             
@@ -444,8 +561,8 @@ class BaseDeDatos:
             return []
         finally:
             if cursor: cursor.close()
-            if conexion: conexion.close()
-            
+            if conexion: conexion.close() 
+
     def obtener_datos_evolucion_puestos(self, edicion_id, usuarios_seleccionados):
         """
         Calcula la evolución del ranking aplicando los nuevos criterios:
