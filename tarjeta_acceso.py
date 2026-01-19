@@ -28,7 +28,7 @@ class TarjetaAcceso(ft.Container):
         t_ing = ft.Text("YA TENGO CUENTA", size=20, weight=ft.FontWeight.BOLD, color=Estilos.COLOR_BLANCO)
 
         # --- CAMPOS REGISTRO ---
-        self.user_reg = ft.TextField(label="Nombre de usuario", on_change=self._validar_registro, **Estilos.INPUT_CONFIG)
+        self.user_reg = ft.TextField(label="Nombre de usuario o correo electrónico", on_change=self._validar_registro, **Estilos.INPUT_CONFIG)
         
         # NUEVO CAMPO EMAIL
         self.email_reg = ft.TextField(label="Correo Electrónico", on_change=self._validar_registro, **Estilos.INPUT_CONFIG)
@@ -39,7 +39,7 @@ class TarjetaAcceso(ft.Container):
         sep = ft.Divider(height=40, thickness=2, color="white")
 
         # --- CAMPOS INGRESO ---
-        self.user_ing = ft.TextField(label="Nombre de usuario", on_change=self._validar_ingreso, **Estilos.INPUT_CONFIG)
+        self.user_ing = ft.TextField(label="Nombre de usuario o correo electrónico", on_change=self._validar_ingreso, **Estilos.INPUT_CONFIG)
         self.pass_ing = ft.TextField(label="Contraseña", password=True, can_reveal_password=True, disabled=True, on_change=self._validar_ingreso, **Estilos.INPUT_CONFIG)
 
         # NUEVO LINK RECUPERAR
@@ -456,29 +456,36 @@ class TarjetaAcceso(ft.Container):
             VentanaCarga.cerrar(self.page_principal)
 
     def _ingresar(self, e):
-        usuario = self.user_ing.value.strip()
+        usuario_input = self.user_ing.value.strip()
         password = self.pass_ing.value
         
-        if not usuario or not password: return
+        if not usuario_input or not password: return
 
         try:
             # 1. MOSTRAR CARGA
+            # El mensaje se mantendrá visible mientras se procesa todo
             VentanaCarga.mostrar(self.page_principal, "Iniciando sesión...")
             time.sleep(0.1)
 
-            # 2. OPERACIÓN PESADA
-            exito = self.db.validar_usuario(usuario, password)
+            # 2. OPERACIÓN PESADA (Validar contra BD)
+            nombre_real_usuario = self.db.validar_usuario(usuario_input, password)
             
-            # IMPORTANTE: Cerramos la carga ANTES de cambiar de pantalla o mostrar error
-            VentanaCarga.cerrar(self.page_principal) 
+            # 3. CAMBIO DE PANTALLA
+            # Llamamos a la función de éxito MIENTRAS la ventana de carga sigue abierta.
+            # Esto construirá el menú principal por detrás del mensaje de carga.
+            if self.on_login_success:
+                self.on_login_success(nombre_real_usuario)
 
-            if exito:
-                if self.on_login_success:
-                    self.on_login_success(usuario)
-            else:
-                GestorMensajes.mostrar(self.page_principal, "Acceso Denegado", "Usuario o contraseña incorrectos.", "error")
-        
-        except Exception as error:
-            # Si hubo error, nos aseguramos de cerrar la carga también
+            # 4. CERRAR CARGA
+            # Recién ahora, cuando el menú ya está listo, quitamos el mensaje.
             VentanaCarga.cerrar(self.page_principal)
-            GestorMensajes.mostrar(self.page_principal, "Error de Sistema", str(error), "error")
+        
+        except ValueError as ve:
+            # Si hay error de validación, cerramos la carga para mostrar el mensaje
+            VentanaCarga.cerrar(self.page_principal)
+            GestorMensajes.mostrar(self.page_principal, "Advertencia", str(ve), "error")
+
+        except Exception as error:
+            # Si hay error técnico, cerramos la carga para mostrar el mensaje
+            VentanaCarga.cerrar(self.page_principal)
+            GestorMensajes.mostrar(self.page_principal, "Error de Sistema", f"Fallo técnico: {error}", "error")

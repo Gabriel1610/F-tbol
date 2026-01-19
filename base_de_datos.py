@@ -1302,10 +1302,11 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    def obtener_ranking_anti_mufa(self, edicion_id=None, anio=None):
+    def obtener_ranking_mufa(self, edicion_id=None, anio=None):
         """
-        Calcula el porcentaje Anti-mufa.
-        CAMBIO: Se usa INNER JOIN para excluir usuarios que nunca pronosticaron derrota.
+        Calcula el porcentaje de MUFA.
+        Mufa = Usuario que pronostica derrota y el equipo PIERDE.
+        Fórmula: (Derrotas Acertadas / Total Predicciones de Derrota) * 100
         """
         conexion = None
         cursor = None
@@ -1327,15 +1328,17 @@ class BaseDeDatos:
             SELECT 
                 u.username,
                 stats.predicciones_derrota,
-                stats.derrotas_evitadas,
-                stats.porcentaje_anti_mufa
+                stats.derrotas_acertadas,
+                stats.porcentaje_mufa
             FROM usuarios u
-            INNER JOIN (  -- CAMBIO: INNER JOIN excluye a los que no están en esta subconsulta
+            INNER JOIN (
                 SELECT 
                     pr.usuario_id,
                     COUNT(*) as predicciones_derrota,
-                    SUM(CASE WHEN p.goles_independiente >= p.goles_rival THEN 1 ELSE 0 END) as derrotas_evitadas,
-                    (SUM(CASE WHEN p.goles_independiente >= p.goles_rival THEN 1 ELSE 0 END) / COUNT(*)) * 100 as porcentaje_anti_mufa
+                    -- CAMBIO CLAVE: Contamos cuando REALMENTE PERDIÓ (Goles CAI < Goles Rival)
+                    SUM(CASE WHEN p.goles_independiente < p.goles_rival THEN 1 ELSE 0 END) as derrotas_acertadas,
+                    -- Cálculo de porcentaje
+                    (SUM(CASE WHEN p.goles_independiente < p.goles_rival THEN 1 ELSE 0 END) / COUNT(*)) * 100 as porcentaje_mufa
                 FROM pronosticos pr
                 INNER JOIN (
                     SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
@@ -1349,14 +1352,14 @@ class BaseDeDatos:
                 JOIN anios a ON e.anio_id = a.id
                 WHERE 
                     p.goles_independiente IS NOT NULL
-                    AND pr.pred_goles_independiente < pr.pred_goles_rival -- FILTRO: Solo derrotas pronosticadas
+                    AND pr.pred_goles_independiente < pr.pred_goles_rival -- FILTRO: Solo cuando pronosticó derrota
                     {filtro_sql}
                 GROUP BY pr.usuario_id
             ) stats ON u.id = stats.usuario_id
             
             ORDER BY 
-                stats.porcentaje_anti_mufa DESC, 
-                stats.predicciones_derrota DESC,
+                stats.porcentaje_mufa DESC,      -- El mayor % es el MÁS MUFA
+                stats.predicciones_derrota DESC, -- Desempate por cantidad
                 u.username ASC
             """
             
@@ -1364,12 +1367,12 @@ class BaseDeDatos:
             return cursor.fetchall()
 
         except Exception as e:
-            logger.error(f"Error calculando ranking anti-mufa: {e}")
+            logger.error(f"Error calculando ranking mufa: {e}")
             return []
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-
+            
     def obtener_ranking_falso_profeta(self, edicion_id=None, anio=None):
         """
         Ranking de Falso Profeta.
@@ -1713,30 +1716,214 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    def validar_usuario(self, username, password):
+    # --- AGREGAR AL FINAL DE LA CLASE BaseDeDatos ---
+
+    def obtener_pendientes_notificacion(self, dias=5):
+        """
+        Obtiene una lista de usuarios que tienen partidos sin pronosticar 
+        en los próximos 'dias' y que NO han sido notificados hoy.
+        Retorna: Lista de tuplas (id_usuario, username, email, rival_nombre, fecha_partido)
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            # La lógica es:
+            # 1. Traer partidos futuros dentro del rango de días.
+            # 2. Cruzar con usuarios que tienen email.
+            # 3. Filtrar usuarios que YA fueron notificados HOY (DATE(now) > DATE(ultima_notif)).
+            # 4. Excluir combinaciones (Usuario-Partido) que YA tienen pronóstico.
+            
+            sql = f"""
+            SELECT 
+                u.id, 
+                u.username, 
+                u.email, 
+                r.nombre, 
+                p.fecha_hora
+            FROM partidos p
+            JOIN rivales r ON p.rival_id = r.id
+            CROSS JOIN usuarios u
+            LEFT JOIN pronosticos pr ON p.id = pr.partido_id AND u.id = pr.usuario_id
+            WHERE 
+                p.fecha_hora >= NOW() 
+                AND p.fecha_hora <= DATE_ADD(NOW(), INTERVAL %s DAY)
+                AND pr.id IS NULL -- Que NO tenga pronóstico
+                AND u.email IS NOT NULL -- Que tenga email
+                AND (u.fecha_ultima_notificacion IS NULL OR DATE(u.fecha_ultima_notificacion) < CURDATE())
+            ORDER BY u.id, p.fecha_hora ASC
+            """
+            
+            cursor.execute(sql, (dias,))
+            return cursor.fetchall()
+
+        except Exception as e:
+            logger.error(f"Error obteniendo pendientes notificación: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def marcar_usuario_notificado(self, usuario_id):
+        """Actualiza la fecha de última notificación a 'ahora'."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            
+            sql = "UPDATE usuarios SET fecha_ultima_notificacion = NOW() WHERE id = %s"
+            cursor.execute(sql, (usuario_id,))
+            conexion.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error marcando notificado: {e}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def validar_usuario(self, input_identificador, password):
+        """
+        Verifica si el texto ingresado coincide con un Usuario O un Email.
+        Retorna el 'username' real si la contraseña es correcta.
+        Lanza excepciones con mensajes específicos para la UI.
+        """
         conexion = None
         cursor = None
         try:
             conexion = self.abrir()
             cursor = conexion.cursor(dictionary=True)
             
-            sql = "SELECT password FROM usuarios WHERE username = %s"
-            cursor.execute(sql, (username,))
+            # Búsqueda dual: Nombre de usuario O Correo
+            sql = "SELECT username, password FROM usuarios WHERE username = %s OR email = %s"
+            cursor.execute(sql, (input_identificador, input_identificador))
             usuario = cursor.fetchone()
             
-            if usuario:
-                hash_guardado = usuario['password']
-                try:
-                    self.ph.verify(hash_guardado, password)
-                    return True
-                except VerifyMismatchError:
-                    return False
-            return False
+            # --- VALIDACIÓN 1: EXISTENCIA ---
+            if not usuario:
+                # Mensaje específico solicitado
+                raise ValueError("El texto ingresado no corresponde a ningún nombre de usuario ni correo electrónico registrado.")
             
+            # --- VALIDACIÓN 2: CONTRASEÑA ---
+            hash_guardado = usuario['password']
+            try:
+                self.ph.verify(hash_guardado, password)
+                # Retornamos el username real para que el sistema cargue los datos correctos
+                return usuario['username']
+            except VerifyMismatchError:
+                raise ValueError("La contraseña es incorrecta.")
+            
+        except ValueError as ve:
+            # Re-lanzamos los errores de validación (usuario no existe / contraseña mal)
+            raise ve
         except Exception as e:
             logger.error(f"Error validando usuario: {e}")
-            # --- MODIFICACIÓN: Lanzar el error real al usuario ---
-            raise Exception(f"Fallo técnico: {e}")
+            raise Exception(f"Fallo técnico en base de datos: {e}")
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
+
+    def verificar_username_libre(self, nuevo_username):
+        """Verifica que el nuevo nombre de usuario no esté ocupado."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            sql = "SELECT id FROM usuarios WHERE username = %s"
+            cursor.execute(sql, (nuevo_username,))
+            if cursor.fetchone():
+                raise Exception("El nombre de usuario ya está en uso.")
+            return True
+        except Exception as e:
+            raise e
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def actualizar_username(self, id_usuario, nuevo_username):
+        """Actualiza el nombre de usuario."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            sql = "UPDATE usuarios SET username = %s WHERE id = %s"
+            cursor.execute(sql, (nuevo_username, id_usuario))
+            conexion.commit()
+            return True
+        except Exception as e:
+            raise e
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
+    def obtener_id_por_username(self, username):
+        """Obtiene el ID numérico de un usuario."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            cursor.execute("SELECT id FROM usuarios WHERE username = %s", (username,))
+            res = cursor.fetchone()
+            return res[0] if res else None
+        except Exception:
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+            
+    def actualizar_email_usuario(self, username, nuevo_email):
+        """Actualiza el correo electrónico del usuario."""
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            
+            # Verificar que el email no lo esté usando otro usuario
+            sql_check = "SELECT id FROM usuarios WHERE email = %s AND username != %s"
+            cursor.execute(sql_check, (nuevo_email, username))
+            if cursor.fetchone():
+                raise Exception("El correo ya está en uso por otra cuenta.")
+
+            sql = "UPDATE usuarios SET email = %s WHERE username = %s"
+            cursor.execute(sql, (nuevo_email, username))
+            conexion.commit()
+            return True
+        except Exception as e:
+            raise e
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+    
+    def verificar_email_libre(self, nuevo_email, usuario_actual):
+        """
+        Verifica si un email está disponible para cambio (que no lo tenga OTRO usuario).
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            
+            # Buscamos si existe el email PERO asociado a un usuario DISTINTO al actual
+            sql = "SELECT username FROM usuarios WHERE email = %s AND username != %s"
+            cursor.execute(sql, (nuevo_email, usuario_actual))
+            resultado = cursor.fetchone()
+            
+            if resultado:
+                raise Exception("El correo electrónico ya está registrado por otra cuenta.")
+                
+            return True 
+            
+        except Exception as e:
+            raise e
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+            

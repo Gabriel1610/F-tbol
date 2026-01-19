@@ -4,6 +4,7 @@ import shutil
 import time
 import stat
 import datetime
+import sys  # <--- [NUEVO] Necesario para encontrar el Python del venv
 
 # --- CONFIGURACIÓN DEL PROYECTO ---
 NOMBRE_ARCHIVO = 'Independiente'  # Nombre del script principal (sin .py)
@@ -66,7 +67,11 @@ def ejecutar_pyinstaller():
         return False
 
     comando = [
-        "pyinstaller", 
+        # --- [CORRECCIÓN CRÍTICA] ---
+        # Usamos el python actual (del venv) para llamar al módulo PyInstaller
+        # Esto evita el error "FileNotFoundError"
+        sys.executable, "-m", "PyInstaller", 
+        
         "--noconsole",          
         "--onefile",            
         f"--name={NOMBRE_ARCHIVO}",
@@ -77,7 +82,6 @@ def ejecutar_pyinstaller():
         f"--add-data={RUTA_ICONO_ABS};.", # Ícono
         
         # --- LA SOLUCIÓN DEFINITIVA ---
-        # --collect-all obliga a PyInstaller a traer TODO el paquete (código + datos internos)
         "--collect-all=mysql", 
         "--collect-all=mysql.connector",
         
@@ -93,6 +97,7 @@ def ejecutar_pyinstaller():
     print("Inicio de compilación: " + inicio.strftime("%H:%M:%S"))
 
     # Ejecutamos el comando
+    # shell=True a veces ayuda en Windows, pero con sys.executable no suele ser necesario
     resultado = subprocess.run(comando, capture_output=True, text=True)
 
     fin = datetime.datetime.now()
@@ -105,7 +110,8 @@ def ejecutar_pyinstaller():
         return True
     else:
         print("\n>> ERROR EN PYINSTALLER:")
-        print(resultado.stderr[-3000:]) # Mostramos más líneas del error
+        # Mostramos las últimas líneas del error para no saturar la consola
+        print(resultado.stderr[-5000:]) 
         return False
 
 def mover_y_limpiar():

@@ -3,6 +3,10 @@ import os
 import time
 import threading
 import requests
+import smtplib
+import random
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from tarjeta_acceso import TarjetaAcceso
 from estilos import Estilos
 from base_de_datos import BaseDeDatos
@@ -15,12 +19,99 @@ MAXIMA_CANTIDAD_DE_PUNTOS = 9
 ID_INDEPENDIENTE = 10078  # ID real de Independiente en FotMob
 URL_API = "https://www.fotmob.com/api/teams"
 CANT_PARTIDOS_A_SINCRONIZAR = 5
+REMITENTE = "gabrielydeindependiente@gmail.com"
+PASSWORD = "vjpz rjcz nkgq zqaq"
+DÍAS_NOTIFICACIÓN = 3  # Días antes del partido para notificar
 
 class SistemaIndependiente:
     def __init__(self, page: ft.Page):
         self.page = page
         self._configurar_ventana()
         self._construir_interfaz_login()
+        threading.Thread(target=self._servicio_notificaciones_background, daemon=True).start()
+
+    def _servicio_notificaciones_background(self):
+        """
+        Revisa si hay usuarios sin pronosticar partidos próximos y les envía un correo.
+        Se ejecuta una sola vez al iniciar la app.
+        """
+        # Esperamos unos segundos para no ralentizar el inicio visual de la app
+        time.sleep(5) 
+        
+        try:
+            print("🔔 Verificando notificaciones pendientes...")
+            bd = BaseDeDatos()
+            pendientes = bd.obtener_pendientes_notificacion(dias=DÍAS_NOTIFICACIÓN)
+            
+            if not pendientes:
+                print("   -> No hay notificaciones para enviar hoy.")
+                return
+
+            # Agrupar datos por usuario: {id_usuario: {'email': x, 'user': x, 'partidos': []}}
+            usuarios_a_notificar = {}
+            
+            for fila in pendientes:
+                uid, uname, email, rival, fecha = fila
+                
+                if uid not in usuarios_a_notificar:
+                    usuarios_a_notificar[uid] = {
+                        'username': uname,
+                        'email': email,
+                        'partidos': []
+                    }
+                
+                # Formato legible de fecha
+                fecha_str = fecha.strftime('%d/%m %H:%M')
+                usuarios_a_notificar[uid]['partidos'].append(f"{rival} ({fecha_str})")
+
+            # Enviar correos
+            cantidad_enviados = 0
+            
+            for uid, datos in usuarios_a_notificar.items():
+                destinatario = datos['email']
+                username = datos['username']
+                lista_partidos = "\n".join([f"- {p}" for p in datos['partidos']])
+                
+                asunto = "⚠️ Recordatorio: Partidos sin pronosticar - CAI"
+                cuerpo = f"""Hola {username},
+
+Te recordamos que faltan menos de {DÍAS_NOTIFICACIÓN} días para los siguientes partidos y aún no has cargado tu pronóstico:
+
+{lista_partidos}
+
+¡No te olvides de sumar puntos!
+Ingresa a la aplicación para dejar tu resultado.
+
+Saludos,
+El Sistema.
+                        """
+                # Envío SMTP
+                try:
+                    msg = MIMEMultipart()
+                    msg['From'] = REMITENTE
+                    msg['To'] = destinatario
+                    msg['Subject'] = asunto
+                    msg.attach(MIMEText(cuerpo, 'plain'))
+                    
+                    server = smtplib.SMTP('smtp.gmail.com', 587)
+                    server.starttls()
+                    server.login(REMITENTE, PASSWORD)
+                    server.send_message(msg)
+                    server.quit()
+                    
+                    # Si se envió bien, actualizamos la BD para no molestar más hoy
+                    bd.marcar_usuario_notificado(uid)
+                    cantidad_enviados += 1
+                    print(f"   -> Correo enviado a {username}")
+                    
+                except Exception as e_mail:
+                    print(f"   [!] Error enviando a {username}: {e_mail}")
+
+            if cantidad_enviados > 0:
+                print(f"🔔 Se enviaron {cantidad_enviados} notificaciones exitosamente.")
+
+        except Exception as e:
+            print(f"Error en servicio de notificaciones: {e}")
 
     def _sincronizar_fixture_api(self):
         """
@@ -273,107 +364,118 @@ class SistemaIndependiente:
         self.txt_titulo_pronosticos.update()
 
     def _abrir_modal_falso_profeta(self, e):
-        """Abre la ventana modal con la tabla de Falso Profeta (Actualizada con contexto en título)."""
-        
-        # 1. Determinar el título dinámico según el filtro activo
-        titulo = "Ranking de falso profeta (Histórico)" # Por defecto
-        
-        if self.filtro_ranking_nombre: 
-             # Ejemplo: Ranking de falso profeta (Liga Profesional 2025)
-             titulo = f"Ranking de falso profeta ({self.filtro_ranking_nombre})"
-        elif self.filtro_ranking_anio:
-             # Ejemplo: Ranking de falso profeta (2025)
-             titulo = f"Ranking de falso profeta ({self.filtro_ranking_anio})"
-             
-        self.loading_modal = ft.ProgressBar(width=200, color="amber", bgcolor="#222222")
-        
-        # Dimensiones ajustadas
-        columna_content = ft.Column(
-            controls=[
-                ft.Text(titulo, size=18, weight="bold", color="white"),
-                ft.Container(height=10),
-                self.loading_modal,
-                ft.Container(height=50)
-            ],
-            height=150,
-            width=550,
-            scroll=None
-        )
-        
-        self.dlg_falso_profeta = ft.AlertDialog(content=columna_content, modal=True)
-        self.page.open(self.dlg_falso_profeta)
-
-        def _cargar():
+        """Muestra el ranking de 'Falso Profeta' (Quienes pronostican victoria y pierden/empatan)."""
+        try:
             bd = BaseDeDatos()
             datos = bd.obtener_ranking_falso_profeta(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
             
             filas = []
-            for i, row in enumerate(datos, start=1):
-                # row: [0] user, [1] victorias_pronosticadas, [2] porcentaje_acierto
-                user = row[0]
-                predicciones = row[1]
-                porcentaje = row[2]
+            for i, fila in enumerate(datos, start=1):
+                user = fila[0]
+                victorias_pred = fila[1]
+                porcentaje_acierto = fila[2]
                 
-                # Formato: 2 decimales, coma, espacio y %
-                txt_porcentaje = f"{porcentaje:.2f} %".replace('.', ',')
+                txt_porcentaje = f"{porcentaje_acierto:.1f}%".replace('.', ',')
+                
+                # En Falso Profeta, MENOS acierto es PEOR (Más falso profeta)
+                if porcentaje_acierto <= 20: color_txt = "red"
+                elif porcentaje_acierto <= 50: color_txt = "orange"
+                else: color_txt = "green"
                 
                 filas.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.Container(content=ft.Text(f"{i}º", color="white", weight="bold"), width=50, alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(user, color="white", weight="bold"), width=150, alignment=ft.alignment.center_left)),
-                    ft.DataCell(ft.Container(content=ft.Text(str(predicciones), color="cyan", weight="bold"), width=100, alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(txt_porcentaje, color="red", weight="bold"), width=100, alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Text(f"{i}º", color="white", weight=ft.FontWeight.BOLD)),
+                    ft.DataCell(ft.Text(user, color="white")),
+                    ft.DataCell(ft.Container(content=ft.Text(str(victorias_pred), color="cyan"), alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(txt_porcentaje, color=color_txt, weight=ft.FontWeight.BOLD), alignment=ft.alignment.center)),
                 ]))
-            
+
             tabla = ft.DataTable(
                 columns=[
-                    ft.DataColumn(ft.Container(content=ft.Text("Puesto", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
-                    ft.DataColumn(ft.Container(content=ft.Text("Usuario", weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
-                    ft.DataColumn(ft.Container(content=ft.Text("Victorias\npronosticadas", color="cyan", text_align="center", weight="bold"), width=100, alignment=ft.alignment.center), numeric=True),
-                    ft.DataColumn(ft.Container(content=ft.Text("Porcentaje\nde aciertos", color="red", text_align="center", weight="bold"), width=100, alignment=ft.alignment.center), numeric=True),
+                    ft.DataColumn(ft.Text("Pos")),
+                    ft.DataColumn(ft.Text("Usuario")),
+                    ft.DataColumn(ft.Text("Pred. Victoria", tooltip="Veces que dijo que ganábamos"), numeric=True),
+                    ft.DataColumn(ft.Text("% Acierto", tooltip="Porcentaje de veces que realmente ganamos"), numeric=True),
                 ],
                 rows=filas,
                 heading_row_color="black",
+                data_row_color={"hoverED": "#1A1A1A"},
                 border=ft.border.all(1, "white10"),
-                column_spacing=20,
-                heading_row_height=60,
-                data_row_max_height=50,
-                data_row_min_height=50
+                column_spacing=20
             )
             
-            columna_content.height = 340
-            columna_content.width = 550
-            
-            columna_content.controls = [
-                ft.Text(titulo, size=18, weight="bold", color="white"),
-                ft.Container(height=10),
-                ft.Column(
-                    controls=[tabla],
-                    height=220, 
-                    scroll=ft.ScrollMode.AUTO
-                ),
-                ft.Container(height=10),
-                ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_falso_profeta))], alignment=ft.MainAxisAlignment.END)
-            ]
-            self.dlg_falso_profeta.update()
-            
-        threading.Thread(target=_cargar, daemon=True).start()
+            dlg = ft.AlertDialog(
+                title=ft.Text("Ranking Falso Profeta 🤡"),
+                content=ft.Column([
+                    # --- AQUÍ ESTÁ EL TEXTO NUEVO ---
+                    ft.Text("Usuarios que más le erran cuando dicen que el Rojo va a ganar.", size=12, color="white70"),
+                    
+                    ft.Container(
+                        height=400,
+                        content=ft.Column(
+                            controls=[tabla],
+                            scroll=ft.ScrollMode.AUTO
+                        )
+                    )
+                ], tight=True),
+                actions=[ft.TextButton("Cerrar", on_click=lambda e: self.page.close(dlg))]
+            )
+            self.page.open(dlg)
+
+        except Exception as ex:
+            GestorMensajes.mostrar(self.page, "Error", f"No se pudo cargar falso profeta: {ex}", "error")
 
     def _seleccionar_fila_ranking(self, usuario):
-        """Maneja el clic en una fila de la tabla de estadísticas."""
-        # Si toco el mismo que ya estaba seleccionado, lo desmarco
+        """Marca visualmente la fila sin recargar datos ni activar selección nativa."""
+        # 1. Actualizar estado
         if self.usuario_seleccionado_ranking == usuario:
             self.usuario_seleccionado_ranking = None
         else:
             self.usuario_seleccionado_ranking = usuario
-
-        # Iterar filas para pintar la correcta
+            
+        # 2. Actualizar color manualmente
         for row in self.tabla_estadisticas.rows:
             if row.data == self.usuario_seleccionado_ranking:
-                row.color = "#8B0000" # Rojo oscuro
+                row.color = "#8B0000"
+                # row.selected = True  <--- ¡ESTO NO LO PONGAS!
             else:
                 row.color = None
+                # row.selected = False <--- ESTO TAMPOCO
         
         self.tabla_estadisticas.update()
+
+    def _seleccionar_fila_pronostico(self, row_key):
+        """Marca visualmente la fila sin recargar datos ni activar selección nativa."""
+        # 1. Actualizar estado
+        if self.pronostico_seleccionado_key == row_key:
+            self.pronostico_seleccionado_key = None
+        else:
+            self.pronostico_seleccionado_key = row_key
+            
+        # 2. Actualizar color manualmente
+        for row in self.tabla_pronosticos.rows:
+            if row.data == self.pronostico_seleccionado_key:
+                row.color = "#8B0000"
+            else:
+                row.color = None
+                
+        self.tabla_pronosticos.update()
+
+    def _seleccionar_fila_pronostico(self, row_key):
+        """Marca visualmente la fila sin recargar datos ni activar selección nativa."""
+        # 1. Actualizar estado
+        if self.pronostico_seleccionado_key == row_key:
+            self.pronostico_seleccionado_key = None
+        else:
+            self.pronostico_seleccionado_key = row_key
+            
+        # 2. Actualizar color manualmente
+        for row in self.tabla_pronosticos.rows:
+            if row.data == self.pronostico_seleccionado_key:
+                row.color = "#8B0000"
+            else:
+                row.color = None
+                
+        self.tabla_pronosticos.update()
 
     # --- PANTALLA 2: MENÚ PRINCIPAL ---
 
@@ -418,6 +520,7 @@ class SistemaIndependiente:
         self.chk_usuarios_grafico_lp = [] 
         self.usuario_grafico_barra_sel = None 
         self.usuario_seleccionado_ranking = None
+        self.pronostico_seleccionado_key = None
 
         # NUEVAS VARIABLES DE ESTADO PARA FILTROS CONJUNTOS
         self.filtro_temporal = 'futuros'      # 'todos', 'jugados', 'futuros'
@@ -470,36 +573,102 @@ class SistemaIndependiente:
         self.contenedor_graficos_barra = ft.Container(padding=ft.padding.all(10), border=ft.border.all(1, "white24"), border_radius=8, bgcolor="#1E1E1E", content=ft.Column(spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER, controls=[ft.Text("Gráficos de barra", size=11, weight=ft.FontWeight.BOLD, color="white54"), self.btn_grafico_barras_puntos]))
 
         # --- CONTENEDOR 4: RANKINGS (FUSIÓN ÍNDICES Y FALSO PROFETA) ---
-        self.btn_indice_opt_pes = ft.ElevatedButton("Optimismo/Pesimismo", icon=ft.icons.ASSESSMENT, bgcolor="#333333", color="white", width=180, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_opt_pes)
-        self.btn_ranking_fp = ft.ElevatedButton("Falso profeta", icon=ft.icons.NEW_RELEASES, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_falso_profeta)
         
-        # --- NUEVO BOTÓN ANTI-MUFA ---
-        self.btn_anti_mufa = ft.ElevatedButton("Anti-mufa", icon=ft.icons.SHIELD, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_anti_mufa)
+        # ============================================================
+        # 1. DEFINICIÓN DE BOTONES (Columna Izquierda)
+        # ============================================================
+        
+        # Botón 1: Optimismo/Pesimismo
+        self.btn_indice_opt_pes = ft.ElevatedButton(
+            "Optimismo/Pesimismo", 
+            icon="assessment", 
+            bgcolor="#333333", 
+            color="white", 
+            width=180, 
+            height=45, 
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_modal_opt_pes
+        )
 
-        # --- NUEVO BOTÓN MEJOR PREDICTOR ---
-        self.btn_mejor_predictor = ft.ElevatedButton("Mejor predictor", icon=ft.icons.PRECISION_MANUFACTURING, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_mejor_predictor)
+        # Botón 2: Falso Profeta
+        self.btn_ranking_fp = ft.ElevatedButton(
+            "Falso profeta", 
+            icon="new_releases", 
+            bgcolor="#333333", 
+            color="white", 
+            width=140, 
+            height=45, 
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_modal_falso_profeta
+        )
 
-        # --- NUEVO BOTÓN RACHA ACTUAL ---
-        self.btn_racha_actual = ft.ElevatedButton("Racha actual", icon=ft.icons.TRENDING_UP, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_racha_actual)
+        # Botón 3: Mufa
+        self.btn_mufa = ft.ElevatedButton(
+            "Mufa", 
+            icon="flash_on", 
+            bgcolor="#333333", 
+            color="white", 
+            width=140, 
+            height=45, 
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_modal_mufa
+        )
 
-        # --- NUEVO BOTÓN RACHA RÉCORD ---
-        self.btn_racha_record = ft.ElevatedButton("Racha récord", icon=ft.icons.MILITARY_TECH, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_modal_racha_record)
+        # Botón 4: Mejor Predictor
+        self.btn_mejor_predictor = ft.ElevatedButton(
+            "Mejor predictor", 
+            icon="precision_manufacturing", 
+            bgcolor="#333333", 
+            color="white", 
+            width=140, 
+            height=45, 
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_modal_mejor_predictor
+        )
 
+        # Botón 5: Racha Actual
+        self.btn_racha_actual = ft.ElevatedButton(
+            "Racha actual", 
+            icon="trending_up", 
+            bgcolor="#333333", 
+            color="white", 
+            width=140, 
+            height=45, 
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_modal_racha_actual
+        )
+        
+        # Botón 6: Racha Récord
+        self.btn_racha_record = ft.ElevatedButton(
+            "Racha récord", 
+            icon="military_tech", 
+            bgcolor="#333333", 
+            color="white", 
+            width=140, 
+            height=45, 
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_modal_racha_record
+        )
+
+        # ============================================================
+        # 2. CONTENEDOR DE ÍNDICES (Layout de 3 filas)
+        # ============================================================
         self.contenedor_indices = ft.Container(
             padding=ft.padding.all(10),
             border=ft.border.all(1, "white24"),
             border_radius=8,
-            bgcolor="#1E1E1E", 
+            bgcolor="#1E1E1E",
             content=ft.Column(
                 spacing=10,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    ft.Text("Rankings", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
+                    ft.Text("Rankings", size=11, weight=ft.FontWeight.BOLD, color="white54"),
                     
                     # Fila 1
                     ft.Row(
                         spacing=10,
-                        alignment=ft.MainAxisAlignment.CENTER,
+                        alignment=ft.MainAxisAlignment.START,
+                        scroll=ft.ScrollMode.AUTO,
                         controls=[
                             self.btn_indice_opt_pes,
                             self.btn_ranking_fp
@@ -508,21 +677,23 @@ class SistemaIndependiente:
                     
                     # Fila 2
                     ft.Row(
-                        alignment=ft.MainAxisAlignment.START,
                         spacing=10,
+                        alignment=ft.MainAxisAlignment.START,
+                        scroll=ft.ScrollMode.AUTO,
                         controls=[
-                            self.btn_anti_mufa, 
+                            self.btn_mufa, 
                             self.btn_mejor_predictor
                         ]
                     ),
                     
-                    # Fila 3: Racha actual y Racha récord
+                    # Fila 3
                     ft.Row(
-                        alignment=ft.MainAxisAlignment.START,
                         spacing=10,
+                        alignment=ft.MainAxisAlignment.START,
+                        scroll=ft.ScrollMode.AUTO,
                         controls=[
                             self.btn_racha_actual,
-                            self.btn_racha_record  # <--- Agregado a la derecha
+                            self.btn_racha_record
                         ]
                     )
                 ]
@@ -608,6 +779,101 @@ class SistemaIndependiente:
 
         self.contenedor_admin_rivales = ft.Container(content=ft.Column(controls=[self.input_admin_nombre, self.input_admin_otro, ft.Container(height=10), self.btn_guardar_rival], horizontal_alignment=ft.CrossAxisAlignment.CENTER), padding=20)
 
+        # 0. Obtener datos actuales para mostrar
+        email_actual_display = "Cargando..."
+        try:
+            bd = BaseDeDatos()
+            email_bd = bd.obtener_email_usuario(self.usuario_actual)
+            if email_bd: email_actual_display = email_bd
+            else: email_actual_display = "No registrado"
+        except:
+            email_actual_display = "Error de conexión"
+
+        # Etiquetas de información actual
+        self.txt_info_user_actual = ft.Text(f"Usuario: {self.usuario_actual}", size=14, color="cyan", weight=ft.FontWeight.BOLD)
+        self.txt_info_email_actual = ft.Text(f"Email: {email_actual_display}", size=14, color="cyan", weight=ft.FontWeight.BOLD)
+        
+        contenedor_info_actual = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Icon("info_outline", color="cyan"), # Icono corregido
+                    self.txt_info_user_actual,
+                    ft.Container(width=20),
+                    ft.Icon("email_outlined", color="cyan"), # Icono corregido
+                    self.txt_info_email_actual
+                ]
+            ),
+            bgcolor="#2D2D2D",
+            padding=10,
+            border_radius=8,
+            border=ft.border.all(1, "white10")
+        )
+
+        # 1. PANEL CONTRASEÑA
+        self.input_conf_pass_1 = ft.TextField(label="Nueva contraseña", password=True, can_reveal_password=True, width=280, bgcolor="#2D2D2D", color="white", border_color="white24", label_style=ft.TextStyle(color="white70"), text_size=14)
+        self.input_conf_pass_2 = ft.TextField(label="Repetir contraseña", password=True, can_reveal_password=True, width=280, bgcolor="#2D2D2D", color="white", border_color="white24", label_style=ft.TextStyle(color="white70"), text_size=14)
+        self.btn_conf_guardar_pass = ft.ElevatedButton("Guardar nueva clave", icon="lock_reset", bgcolor="green", color="white", width=280, height=40, on_click=self._guardar_contrasena_config)
+
+        self.frame_cambio_pass = ft.Container(
+            content=ft.Column(controls=[
+                ft.Row([ft.Icon("security", color="cyan"), ft.Text("Seguridad", size=16, weight=ft.FontWeight.BOLD, color="white")]),
+                ft.Divider(color="white24"),
+                ft.Text("Cambiar contraseña", size=12, color="white70"),
+                self.input_conf_pass_1, self.input_conf_pass_2, ft.Container(height=10), self.btn_conf_guardar_pass
+            ], spacing=10),
+            padding=25, border=ft.border.all(1, "white24"), border_radius=10, bgcolor="#1E1E1E", width=350
+        )
+
+        # 2. PANEL EMAIL
+        self.input_conf_email = ft.TextField(label="Nuevo correo", width=280, bgcolor="#2D2D2D", color="white", border_color="white24", label_style=ft.TextStyle(color="white70"), text_size=14, prefix_icon="email")
+        self.btn_conf_guardar_email = ft.ElevatedButton("Enviar código", icon="send", bgcolor="blue", color="white", width=280, height=40, on_click=self._iniciar_cambio_email)
+
+        self.frame_cambio_email = ft.Container(
+            content=ft.Column(controls=[
+                ft.Row([ft.Icon("alternate_email", color="cyan"), ft.Text("Contacto", size=16, weight=ft.FontWeight.BOLD, color="white")]),
+                ft.Divider(color="white24"),
+                ft.Text("Cambiar email", size=12, color="white70"),
+                self.input_conf_email, ft.Container(height=10), self.btn_conf_guardar_email, ft.Container(height=60)
+            ], spacing=10),
+            padding=25, border=ft.border.all(1, "white24"), border_radius=10, bgcolor="#1E1E1E", width=350
+        )
+
+        # 3. PANEL USUARIO
+        self.input_conf_usuario = ft.TextField(
+            label="Nuevo nombre de usuario", 
+            width=280, 
+            bgcolor="#2D2D2D", 
+            color="white", 
+            border_color="white24", 
+            label_style=ft.TextStyle(color="white70"), 
+            text_size=14, 
+            prefix_icon="person"
+        )
+
+        # --- CAMBIO AQUÍ ---
+        self.btn_conf_guardar_usuario = ft.ElevatedButton(
+            "Guardar cambio", # Texto inicial
+            icon="save",      # Icono de guardar
+            bgcolor="orange", 
+            color="white", 
+            width=280, 
+            height=40, 
+            on_click=self._guardar_nuevo_usuario # Nueva función directa
+        )
+
+        self.frame_cambio_usuario = ft.Container(
+            content=ft.Column(controls=[
+                ft.Row([ft.Icon("account_circle", color="cyan"), ft.Text("Identidad", size=16, weight=ft.FontWeight.BOLD, color="white")]),
+                ft.Divider(color="white24"),
+                ft.Text("Cambiar nombre de usuario", size=12, color="white70"),
+                self.input_conf_usuario, 
+                ft.Container(height=10), 
+                self.btn_conf_guardar_usuario, 
+                ft.Container(height=60)
+            ], spacing=10),
+            padding=25, border=ft.border.all(1, "white24"), border_radius=10, bgcolor="#1E1E1E", width=350
+        )
+
         lista_pestanas = [
             ft.Tab(
                 text="Estadísticas", icon="bar_chart",
@@ -626,7 +892,7 @@ class SistemaIndependiente:
                                         controls=[
                                             self.tabla_estadisticas_header,
                                             ft.Container(
-                                                height=180, 
+                                                height=240, 
                                                 content=ft.Column(
                                                     scroll=ft.ScrollMode.ALWAYS, 
                                                     controls=[self.tabla_estadisticas]
@@ -666,7 +932,7 @@ class SistemaIndependiente:
                                         controls=[
                                             self.txt_titulo_copas,
                                             self.loading_copas,
-                                            ft.Container(height=260, content=ft.Column(spacing=0, controls=[self.tabla_copas_header, ft.Container(height=180, content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_copas]))]))
+                                            ft.Container(height=260, content=ft.Column(spacing=0, controls=[self.tabla_copas_header, ft.Container(height=240, content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_copas]))]))
                                         ]
                                     )
                                 ]
@@ -675,7 +941,6 @@ class SistemaIndependiente:
                     )
                 )
             ),
-            # ... (Resto de pestañas) ...
             ft.Tab(
                 text="Partidos", 
                 icon="sports_soccer", 
@@ -685,17 +950,16 @@ class SistemaIndependiente:
                             self.txt_titulo_partidos, 
                             self.loading_partidos, 
                             
-                            # --- CAMBIO: Barra Horizontal General ---
+                            # --- CAMBIO: Alturas ajustadas para 5 filas ---
                             ft.Row(
-                                scroll=ft.ScrollMode.ALWAYS, # <--- ESTO AGREGA LA BARRA DE DESPLAZAMIENTO
+                                scroll=ft.ScrollMode.ALWAYS, 
                                 controls=[
-                                    # Contenedor que agrupa Tabla + Panel de Pronóstico
                                     ft.Row(
                                         vertical_alignment=ft.CrossAxisAlignment.START, 
                                         controls=[
                                             # 1. La Tabla de Partidos
                                             ft.Container(
-                                                height=380, 
+                                                height=370, # ANTES: 380 -> AHORA: 370 (70 header + 300 cuerpo)
                                                 content=ft.Row(
                                                     controls=[
                                                         ft.Column(
@@ -703,7 +967,7 @@ class SistemaIndependiente:
                                                             controls=[
                                                                 self.tabla_partidos_header, 
                                                                 ft.Container(
-                                                                    height=310, 
+                                                                    height=300, # ANTES: 310 -> AHORA: 300 (5 filas exactas)
                                                                     content=ft.Column(
                                                                         controls=[self.tabla_partidos], 
                                                                         scroll=ft.ScrollMode.ALWAYS
@@ -712,7 +976,7 @@ class SistemaIndependiente:
                                                             ]
                                                         )
                                                     ], 
-                                                    scroll=ft.ScrollMode.ALWAYS # Scroll interno de la tabla
+                                                    scroll=ft.ScrollMode.ALWAYS 
                                                 )
                                             ), 
                                             
@@ -744,7 +1008,6 @@ class SistemaIndependiente:
 
                             ft.Container(height=10), 
                             
-                            # Botones de Filtro
                             ft.Row(
                                 controls=[self.btn_todos, self.btn_jugados, self.btn_por_jugar, self.btn_por_torneo, self.btn_sin_pronosticar, self.btn_por_equipo], 
                                 alignment=ft.MainAxisAlignment.START, 
@@ -767,27 +1030,27 @@ class SistemaIndependiente:
                             self.txt_titulo_pronosticos, 
                             self.loading_pronosticos, 
                             
-                            # CAMBIO: Envolvemos la tabla en un Row con scroll ALWAYS para la barra horizontal
+                            # --- CAMBIO: Alturas ajustadas para 5 filas ---
                             ft.Row(
                                 controls=[
                                     ft.Container(
-                                        height=440, # Altura del contenedor vertical
+                                        height=370, # ANTES: 440 -> AHORA: 370
                                         content=ft.Column(
                                             spacing=0, 
                                             controls=[
                                                 self.tabla_pronosticos_header, 
                                                 ft.Container(
-                                                    height=360, 
+                                                    height=300, # ANTES: 360 -> AHORA: 300 (5 filas exactas)
                                                     content=ft.Column(
                                                         controls=[self.tabla_pronosticos], 
-                                                        scroll=ft.ScrollMode.ALWAYS # Scroll Vertical
+                                                        scroll=ft.ScrollMode.ALWAYS 
                                                     )
                                                 )
                                             ]
                                         )
                                     )
                                 ],
-                                scroll=ft.ScrollMode.ALWAYS # <--- ESTO AGREGA LA BARRA HORIZONTAL
+                                scroll=ft.ScrollMode.ALWAYS 
                             ),
                             
                             ft.Container(height=10), 
@@ -804,7 +1067,33 @@ class SistemaIndependiente:
                     alignment=ft.alignment.top_left
                 )
             ),
-            ft.Tab(text="Configuración", icon="settings", content=ft.Container(content=ft.Column(controls=[ft.Icon(name="settings_applications", size=80, color="white"), ft.Text("Configuración", size=30, color="white")], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER), alignment=ft.alignment.center))
+            ft.Tab(
+                text="Configuración", 
+                icon=ft.icons.SETTINGS, 
+                content=ft.Container(
+                    padding=30, 
+                    alignment=ft.alignment.top_left,
+                    content=ft.Column(
+                        controls=[
+                            ft.Text("Opciones de usuario", size=28, weight=ft.FontWeight.BOLD, color="white"),
+                            contenedor_info_actual, # <--- AQUI SE MUESTRA LA INFO ACTUAL
+                            ft.Container(height=20),
+                            
+                            ft.Row(
+                                controls=[
+                                    self.frame_cambio_pass,
+                                    ft.Container(width=20),
+                                    self.frame_cambio_email,
+                                    ft.Container(width=20),
+                                    self.frame_cambio_usuario # <--- NUEVO PANEL
+                                ],
+                                vertical_alignment=ft.CrossAxisAlignment.START,
+                                scroll=ft.ScrollMode.AUTO
+                            )
+                        ]
+                    )
+                )
+            )
         ]
 
         if usuario == "Gabriel":
@@ -816,6 +1105,74 @@ class SistemaIndependiente:
         self.page.add(mis_pestanas)
         self.page.open(self.dlg_cargando_inicio)
         threading.Thread(target=self._sincronizar_fixture_api, daemon=True).start()
+    
+    def _guardar_nuevo_usuario(self, e):
+        """
+        Cambia el nombre de usuario directamente (sin email) verificando disponibilidad.
+        """
+        nuevo_user = self.input_conf_usuario.value.strip()
+        
+        # 1. Validaciones básicas
+        if not nuevo_user:
+            GestorMensajes.mostrar(self.page, "Atención", "Escriba un nombre.", "error")
+            return
+            
+        if len(nuevo_user) < 3:
+            GestorMensajes.mostrar(self.page, "Error", "El nombre debe tener al menos 3 caracteres.", "error")
+            return
+
+        if nuevo_user == self.usuario_actual:
+            GestorMensajes.mostrar(self.page, "Atención", "El nombre es igual al actual.", "info")
+            return
+
+        def _tarea():
+            # 2. Estado de Carga: "Verificando..."
+            self.btn_conf_guardar_usuario.disabled = True
+            self.btn_conf_guardar_usuario.text = "Verificando..." # <--- TEXTO SOLICITADO
+            self.btn_conf_guardar_usuario.update()
+            
+            try:
+                bd = BaseDeDatos()
+                
+                # A. Verificar disponibilidad
+                bd.verificar_username_libre(nuevo_user)
+                
+                # B. Obtener ID del usuario actual para hacer el update
+                id_user = bd.obtener_id_por_username(self.usuario_actual)
+                
+                if id_user:
+                    # C. Realizar el cambio
+                    bd.actualizar_username(id_user, nuevo_user)
+                    
+                    # D. Actualizar sesión y UI
+                    old_name = self.usuario_actual
+                    self.usuario_actual = nuevo_user
+                    
+                    # Actualizar título de ventana y etiqueta de info
+                    self.page.appbar.title.value = f"Bienvenido, {self.usuario_actual}"
+                    self.txt_info_user_actual.value = f"Usuario: {self.usuario_actual}"
+                    
+                    self.page.appbar.update()
+                    self.txt_info_user_actual.update()
+                    
+                    GestorMensajes.mostrar(self.page, "Éxito", f"Nombre cambiado de {old_name} a {self.usuario_actual}", "exito")
+                    
+                    # Limpiar campo
+                    self.input_conf_usuario.value = ""
+                    self.input_conf_usuario.update()
+                else:
+                    raise Exception("No se pudo identificar al usuario actual.")
+                    
+            except Exception as ex:
+                GestorMensajes.mostrar(self.page, "Error", f"No se pudo guardar: {ex}", "error")
+            
+            finally:
+                # 3. Restaurar botón
+                self.btn_conf_guardar_usuario.disabled = False
+                self.btn_conf_guardar_usuario.text = "Guardar cambio"
+                self.btn_conf_guardar_usuario.update()
+
+        threading.Thread(target=_tarea, daemon=True).start()
 
     def _cambiar_filtro_tiempo_partidos(self, nuevo_tiempo):
         """
@@ -1899,114 +2256,117 @@ class SistemaIndependiente:
         
         self.page.update()
 
-    def _abrir_modal_anti_mufa(self, e):
-        """Abre la ventana modal con la tabla Anti-mufa."""
-        
-        # Título dinámico
-        titulo = "Ranking Anti-mufa (Histórico)"
-        if self.filtro_ranking_nombre: 
-             titulo = f"Ranking Anti-mufa ({self.filtro_ranking_nombre})"
-        elif self.filtro_ranking_anio:
-             titulo = f"Ranking Anti-mufa ({self.filtro_ranking_anio})"
-             
-        self.loading_modal = ft.ProgressBar(width=200, color="amber", bgcolor="#222222")
-        
-        # Contenedor inicial
-        columna_content = ft.Column(
-            controls=[
-                ft.Text(titulo, size=18, weight="bold", color="white"),
-                ft.Container(height=10),
-                self.loading_modal,
-                ft.Container(height=50)
-            ],
-            # Ajuste dinámico de altura luego
-            height=150,
-            width=650,
-            scroll=None
-        )
-        
-        self.dlg_anti_mufa = ft.AlertDialog(content=columna_content, modal=True)
-        self.page.open(self.dlg_anti_mufa)
+    def _guardar_contrasena_config(self, e):
+        """Valida y guarda el cambio de contraseña desde Configuración."""
+        p1 = self.input_conf_pass_1.value
+        p2 = self.input_conf_pass_2.value
 
-        def _cargar():
+        # 1. Validaciones básicas
+        if not p1 or not p2:
+            GestorMensajes.mostrar(self.page, "Error", "Debe completar ambos campos.", "error")
+            return
+        
+        if p1 != p2:
+            GestorMensajes.mostrar(self.page, "Error", "Las contraseñas no coinciden.", "error")
+            return
+
+        # Opcional: Validar longitud mínima
+        if len(p1) < 4:
+            GestorMensajes.mostrar(self.page, "Error", "La contraseña es muy corta.", "error")
+            return
+
+        # 2. Proceso en segundo plano
+        def _tarea():
+            # Deshabilitar botón para evitar doble clic
+            self.btn_conf_guardar_pass.disabled = True
+            self.btn_conf_guardar_pass.update()
+            
+            try:
+                bd = BaseDeDatos()
+                # Reutilizamos la función existente en tu BD
+                bd.cambiar_contrasena(self.usuario_actual, p1)
+                
+                GestorMensajes.mostrar(self.page, "Éxito", "Contraseña actualizada correctamente.", "exito")
+                
+                # Limpiar campos
+                self.input_conf_pass_1.value = ""
+                self.input_conf_pass_2.value = ""
+                self.input_conf_pass_1.update()
+                self.input_conf_pass_2.update()
+                
+            except Exception as ex:
+                GestorMensajes.mostrar(self.page, "Error", f"No se pudo cambiar: {ex}", "error")
+            
+            finally:
+                self.btn_conf_guardar_pass.disabled = False
+                self.btn_conf_guardar_pass.update()
+
+        threading.Thread(target=_tarea, daemon=True).start()
+
+    def _abrir_modal_mufa(self, e):
+        """Muestra el ranking de 'Mufa' (Quienes aciertan más derrotas)."""
+        try:
             bd = BaseDeDatos()
-            datos = bd.obtener_ranking_anti_mufa(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
+            datos = bd.obtener_ranking_mufa(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
             
             filas = []
-            for i, row in enumerate(datos, start=1):
-                # row: [0] username, [1] predicciones_derrota, [2] derrotas_evitadas, [3] porcentaje
-                user = row[0]
-                total_pred_derrota = row[1]
-                porcentaje = float(row[3])
+            for i, fila in enumerate(datos, start=1):
+                user = fila[0]
+                pred_derrotas = fila[1]
+                aciertos = fila[2]
+                porcentaje = fila[3]
                 
-                # Nombre corto solicitado: "% Anti-Mufa"
-                txt_porcentaje = f"{porcentaje:.2f} %".replace('.', ',')
+                txt_porcentaje = f"{porcentaje:.1f}%".replace('.', ',')
                 
-                # --- Lógica de Clasificación ---
-                # Nota: Si total_pred_derrota es 0, técnicamente el porcentaje es 0
-                if porcentaje == 0:
-                    clasificacion = "😅 Mufa pura"
-                    color_val = "red"
-                elif 0 < porcentaje <= 20:
-                    clasificacion = "😐 Poco anti-mufa"
-                    color_val = "orange"
-                elif 20 < porcentaje <= 40:
-                    clasificacion = "🛡️ Anti-mufa moderado"
-                    color_val = "yellow"
-                elif 40 < porcentaje <= 60:
-                    clasificacion = "💪 Anti-mufa fuerte"
-                    color_val = "green"
-                else: # > 60
-                    clasificacion = "🔮 Amuleto viviente"
-                    color_val = "cyan"
-
-                # Si el usuario nunca pronosticó derrota, aclaramos en clasificación (opcional)
-                if total_pred_derrota == 0:
-                    clasificacion = "--- (Sin datos)"
-                    txt_porcentaje = "-"
-                    color_val = "grey"
-
+                # Rojo si acierta mucho las derrotas (Muy mufa)
+                if porcentaje >= 50: color_txt = "red"
+                elif porcentaje >= 20: color_txt = "orange"
+                else: color_txt = "green" 
+                
                 filas.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(user, weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
-                    ft.DataCell(ft.Container(content=ft.Text(txt_porcentaje, weight="bold", color=color_val), width=120, alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(clasificacion, weight="bold", color="white"), width=180, alignment=ft.alignment.center_left)),
+                    ft.DataCell(ft.Text(f"{i}º", color="white", weight=ft.FontWeight.BOLD)),
+                    ft.DataCell(ft.Text(user, color="white")),
+                    ft.DataCell(ft.Container(content=ft.Text(str(pred_derrotas), color="cyan"), alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(str(aciertos), color="white"), alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(txt_porcentaje, color=color_txt, weight=ft.FontWeight.BOLD), alignment=ft.alignment.center)),
                 ]))
-            
+
             tabla = ft.DataTable(
                 columns=[
-                    ft.DataColumn(ft.Container(content=ft.Text("Puesto", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
-                    ft.DataColumn(ft.Container(content=ft.Text("Usuario", weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
-                    ft.DataColumn(ft.Container(content=ft.Text("% Anti-mufa", text_align="center", weight="bold", color="white"), width=120, alignment=ft.alignment.center), numeric=True),
-                    ft.DataColumn(ft.Container(content=ft.Text("Clasificación", weight="bold", color="white"), width=180, alignment=ft.alignment.center_left)),
+                    ft.DataColumn(ft.Text("Pos")),
+                    ft.DataColumn(ft.Text("Usuario")),
+                    ft.DataColumn(ft.Text("Pred. Derrota", tooltip="Veces que pronosticó que perdíamos"), numeric=True),
+                    ft.DataColumn(ft.Text("Acertadas", tooltip="Veces que pronosticó derrota y PERDIMOS"), numeric=True),
+                    ft.DataColumn(ft.Text("% Mufa", tooltip="Porcentaje de derrotas acertadas"), numeric=True),
                 ],
                 rows=filas,
                 heading_row_color="black",
+                data_row_color={"hoverED": "#1A1A1A"},
                 border=ft.border.all(1, "white10"),
-                column_spacing=10,
-                heading_row_height=60,
-                data_row_max_height=50,
-                data_row_min_height=50
+                column_spacing=20
             )
             
-            columna_content.height = 340 # Altura ajustada
-            columna_content.width = 650
-            
-            columna_content.controls = [
-                ft.Text(titulo, size=18, weight="bold", color="white"),
-                ft.Container(height=10),
-                ft.Column(
-                    controls=[tabla],
-                    height=220,
-                    scroll=ft.ScrollMode.AUTO
-                ),
-                ft.Container(height=10),
-                ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_anti_mufa))], alignment=ft.MainAxisAlignment.END)
-            ]
-            self.dlg_anti_mufa.update()
-            
-        threading.Thread(target=_cargar, daemon=True).start()
+            dlg = ft.AlertDialog(
+                title=ft.Text("Ranking Mufa 🌩️"),
+                content=ft.Column([
+                    ft.Text("Usuarios que más aciertan cuando pronostican que el Rojo pierde.", size=12, color="white70"),
+                    # CORRECCIÓN: Quitamos 'scroll' del Container y agregamos un Column interno con scroll
+                    ft.Container(
+                        height=400,
+                        content=ft.Column(
+                            controls=[tabla],
+                            scroll=ft.ScrollMode.AUTO # Aquí sí va el scroll
+                        )
+                    )
+                ], tight=True),
+                actions=[ft.TextButton("Cerrar", on_click=lambda e: self.page.close(dlg))]
+            )
+            self.page.open(dlg)
 
+        except Exception as ex:
+            GestorMensajes.mostrar(self.page, "Error", f"No se pudo cargar mufa: {ex}", "error")
+            return
+        
     def _seleccionar_rival_admin(self, id_rival):
         """Maneja el clic en la tabla de administración de equipos (Sin Recarga de BD)."""
         self.rival_seleccionado_id = id_rival
@@ -2098,40 +2458,161 @@ class SistemaIndependiente:
 
         threading.Thread(target=_guardar, daemon=True).start()
 
+    def _guardar_contrasena_config(self, e):
+        """
+        Valida y guarda el cambio de contraseña desde la pestaña Configuración.
+        """
+        p1 = self.input_conf_pass_1.value
+        p2 = self.input_conf_pass_2.value
+
+        # --- 1. Validaciones Visuales ---
+        if not p1 or not p2:
+            GestorMensajes.mostrar(self.page, "Atención", "Por favor, complete ambos campos.", "error")
+            return
+        
+        if p1 != p2:
+            GestorMensajes.mostrar(self.page, "Error", "Las contraseñas no coinciden.", "error")
+            # Opcional: Marcar bordes en rojo
+            self.input_conf_pass_1.border_color = "red"
+            self.input_conf_pass_2.border_color = "red"
+            self.input_conf_pass_1.update()
+            self.input_conf_pass_2.update()
+            return
+        else:
+            # Restaurar bordes si coinciden
+            self.input_conf_pass_1.border_color = "white24"
+            self.input_conf_pass_2.border_color = "white24"
+            self.input_conf_pass_1.update()
+            self.input_conf_pass_2.update()
+
+        if len(p1) < 4:
+            GestorMensajes.mostrar(self.page, "Seguridad", "La contraseña es muy corta (mínimo 4 caracteres).", "info")
+            return
+
+        # --- 2. Guardado en Segundo Plano ---
+        def _tarea():
+            # Deshabilitar botón para evitar doble clic
+            self.btn_conf_guardar_pass.disabled = True
+            self.btn_conf_guardar_pass.text = "Guardando..."
+            self.btn_conf_guardar_pass.update()
+            
+            try:
+                bd = BaseDeDatos()
+                # Usamos la función cambiar_contrasena que ya tienes en base_de_datos.py
+                # (Sirve tanto para recuperar como para cambiar estando logueado)
+                bd.cambiar_contrasena(self.usuario_actual, p1)
+                
+                GestorMensajes.mostrar(self.page, "Éxito", "Contraseña actualizada correctamente.", "exito")
+                
+                # Limpiar campos
+                self.input_conf_pass_1.value = ""
+                self.input_conf_pass_2.value = ""
+                self.input_conf_pass_1.update()
+                self.input_conf_pass_2.update()
+                
+            except Exception as ex:
+                GestorMensajes.mostrar(self.page, "Error", f"No se pudo cambiar: {ex}", "error")
+            
+            finally:
+                # Rehabilitar botón
+                self.btn_conf_guardar_pass.disabled = False
+                self.btn_conf_guardar_pass.text = "Guardar nueva clave"
+                self.btn_conf_guardar_pass.update()
+
+        threading.Thread(target=_tarea, daemon=True).start()
+
     def _recargar_datos(self, actualizar_partidos=False, actualizar_pronosticos=False, actualizar_ranking=False, actualizar_copas=True, actualizar_admin=False):
-        # ... (Inicio de función IGUAL) ...
-        if actualizar_partidos:
-            self.cargando_partidos = True
+        """
+        Recarga los datos de las tablas solicitadas en segundo plano.
+        """
+        if actualizar_partidos: self.cargando_partidos = True
             
         if not any([actualizar_partidos, actualizar_pronosticos, actualizar_ranking, actualizar_admin]):
             return
 
+        # --- SPINNERS ---
         if actualizar_ranking: self.loading.visible = True
-        if actualizar_ranking and actualizar_copas and self.filtro_ranking_edicion_id is None: self.loading_copas.visible = True 
-        
+        if actualizar_ranking and actualizar_copas and self.filtro_ranking_edicion_id is None: 
+            self.loading_copas.visible = True 
         if actualizar_partidos: 
             self.loading_partidos.visible = True
             self._bloquear_botones_filtros(True) 
-            self.page.update() 
-            
-        if actualizar_pronosticos: self.loading_pronosticos.visible = True
+        if actualizar_pronosticos: 
+            self.loading_pronosticos.visible = True
+            self.tabla_pronosticos.sort_column_index = self.pronosticos_sort_col_index
+            self.tabla_pronosticos.sort_ascending = self.pronosticos_sort_asc
         if actualizar_admin: self.loading_admin.visible = True
         
-        if actualizar_pronosticos:
-             self.tabla_pronosticos.sort_column_index = self.pronosticos_sort_col_index
-             self.tabla_pronosticos.sort_ascending = self.pronosticos_sort_asc
+        self.page.update()
 
         def _tarea_en_segundo_plano():
-            time.sleep(0.5)
+            time.sleep(0.5) 
             try:
                 bd = BaseDeDatos()
                 
-                # ... (Lógica de RANKING, COPAS y ADMIN igual que antes) ...
-                # ... Copia el bloque de 'actualizar_ranking', 'actualizar_copas', etc. ...
+                # ------------------------------------------
+                # 1. RANKING (Corregido: Click en celdas, sin hover nativo)
+                # ------------------------------------------
+                if actualizar_ranking:
+                    datos_ranking = bd.obtener_ranking(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
+                    filas_ranking = []
+                    for i, fila in enumerate(datos_ranking, start=1):
+                        user = fila[0]
+                        total = fila[1]
+                        promedio_intentos = fila[7]
+                        efectividad = fila[8]
+                        
+                        txt_ant = f"{fila[6]:.0f}s" if fila[6] is not None else "0s"
+                        txt_intentos = f"{promedio_intentos:.2f}".replace('.', ',')
+                        txt_efectividad = f"{efectividad:.1f}%".replace('.', ',')
 
-                # --- 1. TABLAS DE USUARIO (SOLO PARTIDOS) ---
+                        # Solo definimos el color, NO usamos 'selected=True'
+                        color_fila = "#8B0000" if user == self.usuario_seleccionado_ranking else None
+                        
+                        # Definimos el evento click para ESTE usuario
+                        # Usamos 'u=user' para capturar el valor en el lambda
+                        evento_click = lambda e, u=user: self._seleccionar_fila_ranking(u)
+
+                        filas_ranking.append(ft.DataRow(
+                            cells=[
+                                # Agregamos on_click a CADA Container de la fila
+                                ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(user, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(str(total), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=100, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(str(fila[5]), color="cyan", weight=ft.FontWeight.BOLD), width=120, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(txt_ant, color="cyan"), width=200, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(txt_intentos, color="cyan"), width=80, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center, on_click=evento_click)),
+                            ],
+                            # QUITAMOS on_select_changed y selected para evitar el destello/hover
+                            color=color_fila,
+                            data=user 
+                        ))
+                    self.tabla_estadisticas.rows = filas_ranking
+
+                # ------------------------------------------
+                # 2. COPAS
+                # ------------------------------------------
+                if actualizar_copas and self.filtro_ranking_edicion_id is None:
+                    datos_copas = bd.obtener_torneos_ganados(self.filtro_ranking_anio)
+                    filas_copas = []
+                    for i, fila in enumerate(datos_copas, start=1):
+                        user = fila[0]
+                        copas = fila[1]
+                        filas_copas.append(ft.DataRow(cells=[
+                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center)),
+                            ft.DataCell(ft.Container(content=ft.Text(user, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(copas), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=120, alignment=ft.alignment.center)),
+                        ]))
+                    self.tabla_copas.rows = filas_copas
+
+                # ------------------------------------------
+                # 3. PARTIDOS (Ya estaba bien)
+                # ------------------------------------------
                 if actualizar_partidos:
-                    # AQUÍ ESTÁ EL CAMBIO CLAVE: Pasamos todos los filtros juntos
                     datos_partidos_user = bd.obtener_partidos(
                         self.usuario_actual, 
                         filtro_tiempo=self.filtro_temporal, 
@@ -2139,13 +2620,10 @@ class SistemaIndependiente:
                         rival_id=self.filtro_rival_id,
                         solo_sin_pronosticar=self.filtro_sin_pronosticar
                     )
-                    
                     filas_tabla_partidos = []
                     for fila in datos_partidos_user:
-                        # ... (Lógica de llenado de filas IGUAL) ...
                         p_id = fila[0]
                         rival = fila[1]
-                        fecha_obj = fila[2]
                         torneo = fila[3]
                         gc = fila[4]
                         gr = fila[5]
@@ -2175,22 +2653,130 @@ class SistemaIndependiente:
 
                         color_fila = "#8B0000" if p_id == self.partido_a_pronosticar_id else None
 
+                        # Evento click reutilizable
+                        evt_click = lambda e, id=p_id: self._seleccionar_partido_click(id)
+
                         filas_tabla_partidos.append(ft.DataRow(
                             cells=[
-                                ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=250, alignment=ft.alignment.center_left, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))), 
-                                ft.DataCell(ft.Container(content=ft.Text(texto_resultado, color="white", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))),
-                                ft.DataCell(ft.Container(content=ft.Text(fecha_display_str, color="white70"), width=140, alignment=ft.alignment.center_left, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))), 
-                                ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))),
-                                ft.DataCell(ft.Container(content=ft.Text(texto_pronostico, color="cyan", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))),
-                                ft.DataCell(ft.Container(content=ft.Text(texto_puntos, color="green", weight=ft.FontWeight.BOLD, size=15), alignment=ft.alignment.center, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id))),
-                                ft.DataCell(ft.Container(content=ft.Text(txt_error, color=color_error, weight=ft.FontWeight.BOLD, size=14), alignment=ft.alignment.center, on_click=lambda e, id=p_id: self._seleccionar_partido_click(id)))
+                                ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=250, alignment=ft.alignment.center_left, on_click=evt_click)), 
+                                ft.DataCell(ft.Container(content=ft.Text(texto_resultado, color="white", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center, on_click=evt_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(fecha_display_str, color="white70"), width=140, alignment=ft.alignment.center_left, on_click=evt_click)), 
+                                ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left, on_click=evt_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(texto_pronostico, color="cyan", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center, on_click=evt_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(texto_puntos, color="green", weight=ft.FontWeight.BOLD, size=15), alignment=ft.alignment.center, on_click=evt_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(txt_error, color=color_error, weight=ft.FontWeight.BOLD, size=14), alignment=ft.alignment.center, on_click=evt_click))
                             ],
                             data=p_id,
                             color=color_fila 
                         ))
                     self.tabla_partidos.rows = filas_tabla_partidos
 
-                # ... (Lógica de PRONÓSTICOS y ADMIN igual que antes) ...
+                # ------------------------------------------
+                # 4. PRONÓSTICOS (Corregido: Click en celdas, sin hover nativo)
+                # ------------------------------------------
+                if actualizar_pronosticos:
+                    datos_raw = bd.obtener_todos_pronosticos()
+                    filas_filtradas = []
+                    
+                    for row in datos_raw:
+                        fecha_partido = row[1]
+                        ahora = datetime.now()
+                        if self.filtro_pron_tiempo == 'futuros' and fecha_partido <= ahora: continue
+                        if self.filtro_pron_tiempo == 'jugados' and fecha_partido > ahora: continue
+                        
+                        if self.filtro_pron_torneo and self.filtro_pron_torneo != row[2]: continue
+                        if self.filtro_pron_equipo and self.filtro_pron_equipo != row[0]: continue
+                        if self.filtro_pron_usuario and self.filtro_pron_usuario != row[5]: continue
+                        
+                        gc, gr = row[3], row[4]
+                        pc, pr = row[6], row[7]
+                        pts, err_abs = row[8], row[10]
+                        
+                        res_txt = f"{gc}-{gr}" if gc is not None else "-"
+                        pron_txt = f"{pc}-{pr}"
+                        
+                        if fecha_partido.time().strftime('%H:%M:%S') == '00:00:00': fecha_disp = fecha_partido.strftime('%d/%m/%Y')
+                        else: fecha_disp = fecha_partido.strftime('%d/%m/%Y %H:%M')
+                            
+                        fecha_pred_disp = row[9].strftime('%d/%m %H:%M') if row[9] else "-"
+                        puntos_disp = str(pts) if pts is not None else "-"
+                        
+                        if err_abs is not None:
+                            val_err = int(err_abs)
+                            err_disp = str(val_err)
+                            if val_err == 0: color_err = "cyan"
+                            elif val_err <= 2: color_err = "green"
+                            elif val_err <= 4: color_err = "yellow"
+                            else: color_err = "red"
+                        else:
+                            err_disp = "-"
+                            color_err = "white70"
+
+                        # ID ÚNICO
+                        row_key = hash(row)
+                        color_fila_pron = "#8B0000" if row_key == self.pronostico_seleccionado_key else None
+                        
+                        # Evento click reutilizable
+                        evt_click_pron = lambda e, k=row_key: self._seleccionar_fila_pronostico(k)
+
+                        filas_filtradas.append(ft.DataRow(
+                            cells=[
+                                ft.DataCell(ft.Container(content=ft.Text(row[0], color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(fecha_disp, color="white"), width=140, alignment=ft.alignment.center, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(row[2], color="yellow"), width=150, alignment=ft.alignment.center_left, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(res_txt, color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(row[5], color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(pron_txt, color="cyan", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(fecha_pred_disp, color="white70"), width=140, alignment=ft.alignment.center, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(puntos_disp, color="green", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(err_disp, color=color_err, weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)),
+                            ],
+                            # QUITAMOS on_select_changed y selected
+                            color=color_fila_pron,
+                            data=row_key 
+                        ))
+                    
+                    if self.pronosticos_sort_col_index is not None:
+                        idx = self.pronosticos_sort_col_index
+                        reverse_sort = not self.pronosticos_sort_asc
+                        def key_sort(row):
+                            try:
+                                val = row.cells[idx].content.content.value
+                                if idx in [7, 8]: return float(val) if val != "-" else -999
+                                if idx in [1, 6]:
+                                    try:
+                                        if ":" in val:
+                                            if val.count("/") == 2: return datetime.strptime(val, "%d/%m/%Y %H:%M")
+                                            return datetime.strptime(val, "%d/%m %H:%M")
+                                        return datetime.strptime(val, "%d/%m/%Y")
+                                    except: return val
+                                return str(val).lower()
+                            except: return ""
+                        filas_filtradas.sort(key=key_sort, reverse=reverse_sort)
+                    
+                    self.tabla_pronosticos.rows = filas_filtradas
+
+                # ------------------------------------------
+                # 5. ADMINISTRACIÓN
+                # ------------------------------------------
+                if actualizar_admin:
+                    datos_rivales = bd.obtener_rivales_completo()
+                    filas_admin = []
+                    for fila in datos_rivales:
+                        r_id = fila[0]
+                        nombre = fila[1]
+                        otro = fila[2] if fila[2] else ""
+                        color_row = "#8B0000" if r_id == self.rival_seleccionado_id else None
+                        
+                        filas_admin.append(ft.DataRow(
+                            cells=[
+                                ft.DataCell(ft.Container(content=ft.Text(nombre, color="white"), width=250, alignment=ft.alignment.center_left, on_click=lambda e, id=r_id: self._seleccionar_rival_admin(id))),
+                                ft.DataCell(ft.Container(content=ft.Text(otro, color="cyan"), width=250, alignment=ft.alignment.center_left, on_click=lambda e, id=r_id: self._seleccionar_rival_admin(id))),
+                            ],
+                            data=r_id,
+                            color=color_row
+                        ))
+                    self.tabla_rivales.rows = filas_admin
 
             except Exception as e:
                 print(f"Error recargando datos: {e}")
@@ -2202,13 +2788,10 @@ class SistemaIndependiente:
                 self.loading_pronosticos.visible = False 
                 self.loading_admin.visible = False
                 
-                # --- VISUAL PARTIDOS ---
                 if actualizar_partidos: 
                     self.cargando_partidos = False
                     self._bloquear_botones_filtros(False) 
                     self._actualizar_botones_partidos_visual()
-                
-                # --- VISUAL PRONÓSTICOS ---
                 if actualizar_pronosticos:
                     self._actualizar_botones_pronosticos_visual()
                     
@@ -2298,6 +2881,156 @@ class SistemaIndependiente:
             self.dlg_racha_record.update()
             
         threading.Thread(target=_cargar, daemon=True).start()
+
+    def _iniciar_cambio_email(self, e):
+        """Valida el email, verifica disponibilidad y envía código."""
+        nuevo_email = self.input_conf_email.value.strip()
+        
+        # 1. Validaciones
+        if not nuevo_email or "@" not in nuevo_email or "." not in nuevo_email:
+            GestorMensajes.mostrar(self.page, "Error", "Ingrese un correo válido.", "error")
+            return
+
+        def _tarea_envio():
+            self.btn_conf_guardar_email.disabled = True
+            self.btn_conf_guardar_email.text = "Enviando..."
+            self.btn_conf_guardar_email.update()
+            
+            try:
+                bd = BaseDeDatos()
+                
+                # --- CORRECCIÓN AQUÍ ---
+                # Usamos la nueva función que ignora tu propio usuario y solo mira si el email está ocupado por otros
+                bd.verificar_email_libre(nuevo_email, self.usuario_actual) 
+                
+                # Generar código
+                self.codigo_verificacion_temp = str(random.randint(100000, 999999))
+                self.email_pendiente_cambio = nuevo_email
+                
+                if REMITENTE == "tu_correo@gmail.com":
+                    print(f"--- MODO DEBUG: EL CÓDIGO ES {self.codigo_verificacion_temp} ---")
+                else:
+                    msg = MIMEMultipart()
+                    msg['From'] = REMITENTE
+                    msg['To'] = nuevo_email
+                    msg['Subject'] = "Código de verificación - Sistema CAI"
+                    cuerpo = f"Hola {self.usuario_actual},\n\nTu código para cambiar el correo es: {self.codigo_verificacion_temp}\n\nSi no solicitaste esto, ignora este mensaje."
+                    msg.attach(MIMEText(cuerpo, 'plain'))
+                    
+                    server = smtplib.SMTP('smtp.gmail.com', 587)
+                    server.starttls()
+                    server.login(REMITENTE, PASSWORD)
+                    server.send_message(msg)
+                    server.quit()
+
+                # Abrir Modal de validación
+                self._abrir_modal_codigo_email()
+                
+            except Exception as ex:
+                GestorMensajes.mostrar(self.page, "Error", f"No se pudo enviar: {ex}", "error")
+            finally:
+                self.btn_conf_guardar_email.disabled = False
+                self.btn_conf_guardar_email.text = "Enviar código"
+                self.btn_conf_guardar_email.update()
+
+        threading.Thread(target=_tarea_envio, daemon=True).start()
+
+    def _abrir_modal_codigo_email(self):
+        """Abre el popup para ingresar el código recibido."""
+        self.input_codigo_verif = ft.TextField(
+            label="Código de 6 dígitos", 
+            text_align=ft.TextAlign.CENTER, 
+            max_length=6, 
+            width=200,
+            bgcolor="#2D2D2D",
+            border_color="cyan",
+            on_change=self._limpiar_error_codigo  # <--- AGREGADO: Limpia error al escribir
+        )
+        
+        # Guardamos el botón en self para poder modificarlo luego (loading)
+        self.btn_confirmar_codigo = ft.ElevatedButton(
+            "Confirmar", 
+            bgcolor="green", 
+            color="white", 
+            on_click=self._confirmar_cambio_email
+        )
+        
+        self.dlg_validar_email = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Verificar Correo"),
+            content=ft.Column(
+                [
+                    ft.Text(f"Se envió un código a:\n{self.email_pendiente_cambio}", size=12, color="white70", text_align="center"),
+                    ft.Container(height=10),
+                    self.input_codigo_verif
+                ],
+                height=120,
+                width=300,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER
+            ),
+            actions=[
+                ft.TextButton("Cancelar", on_click=lambda e: self.page.close(self.dlg_validar_email)),
+                self.btn_confirmar_codigo # <--- Usamos la variable creada arriba
+            ],
+            actions_alignment=ft.MainAxisAlignment.CENTER
+        )
+        self.page.open(self.dlg_validar_email)
+
+    def _limpiar_error_codigo(self, e):
+        """Limpia el mensaje de error visual cuando el usuario escribe."""
+        if self.input_codigo_verif.error_text is not None:
+            self.input_codigo_verif.error_text = None
+            self.input_codigo_verif.border_color = "cyan"
+            self.input_codigo_verif.update()
+
+    def _confirmar_cambio_email(self, e):
+        """Verifica el código y actualiza la BD con animación de carga."""
+        
+        def _tarea_verificacion():
+            # 1. Estado de Carga (Animación visual)
+            self.btn_confirmar_codigo.disabled = True
+            self.btn_confirmar_codigo.text = "Verificando..."
+            self.input_codigo_verif.disabled = True # Bloquear input mientras carga
+            
+            self.btn_confirmar_codigo.update()
+            self.input_codigo_verif.update()
+            
+            # Pequeña pausa artificial para que el usuario alcance a leer "Verificando..."
+            # (opcional, pero mejora la UX si la BD es muy rápida)
+            time.sleep(0.5) 
+
+            codigo_ingresado = self.input_codigo_verif.value.strip()
+            
+            if codigo_ingresado == self.codigo_verificacion_temp:
+                try:
+                    bd = BaseDeDatos()
+                    bd.actualizar_email_usuario(self.usuario_actual, self.email_pendiente_cambio)
+                    
+                    self.page.close(self.dlg_validar_email)
+                    GestorMensajes.mostrar(self.page, "Éxito", "Correo electrónico actualizado correctamente.", "exito")
+                    
+                    # Limpiar campo original
+                    self.input_conf_email.value = ""
+                    self.input_conf_email.update()
+                    
+                except Exception as ex:
+                    # Error de base de datos
+                    self.page.close(self.dlg_validar_email)
+                    GestorMensajes.mostrar(self.page, "Error", f"Error en base de datos: {ex}", "error")
+            else:
+                # Código Incorrecto: Restaurar controles y mostrar error
+                self.btn_confirmar_codigo.disabled = False
+                self.btn_confirmar_codigo.text = "Confirmar"
+                self.input_codigo_verif.disabled = False
+                
+                self.input_codigo_verif.border_color = "red"
+                self.input_codigo_verif.error_text = "Código incorrecto"
+                
+                self.btn_confirmar_codigo.update()
+                self.input_codigo_verif.update()
+
+        # Ejecutar en hilo secundario
+        threading.Thread(target=_tarea_verificacion, daemon=True).start()
 
     def _abrir_selector_torneo(self, e):
         """
