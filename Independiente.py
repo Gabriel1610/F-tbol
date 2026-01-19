@@ -2551,7 +2551,7 @@ El Sistema.
                 bd = BaseDeDatos()
                 
                 # ------------------------------------------
-                # 1. RANKING (Corregido: Click en celdas, sin hover nativo)
+                # 1. RANKING (Formato de Anticipación Corregido)
                 # ------------------------------------------
                 if actualizar_ranking:
                     datos_ranking = bd.obtener_ranking(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
@@ -2562,20 +2562,39 @@ El Sistema.
                         promedio_intentos = fila[7]
                         efectividad = fila[8]
                         
-                        txt_ant = f"{fila[6]:.0f}s" if fila[6] is not None else "0s"
-                        txt_intentos = f"{promedio_intentos:.2f}".replace('.', ',')
-                        txt_efectividad = f"{efectividad:.1f}%".replace('.', ',')
+                        # --- NUEVA LÓGICA DE FORMATO PARA ANTICIPACIÓN ---
+                        raw_seconds = fila[6]
+                        
+                        if raw_seconds is not None:
+                            val_sec = float(raw_seconds)
+                            
+                            # Cálculos matemáticos
+                            dias = int(val_sec // 86400)
+                            resto = val_sec % 86400
+                            horas = int(resto // 3600)
+                            resto %= 3600
+                            minutos = int(resto // 60)
+                            segundos = resto % 60
+                            
+                            # Formato de texto para días (singular/plural)
+                            txt_dias = "1 día" if dias == 1 else f"{dias} días"
+                            
+                            # Formato final: "X días HH:MM:SS.ss h"
+                            # :02d -> Rellena con ceros a 2 dígitos enteros (ej: 03)
+                            # :05.2f -> Rellena con ceros a 2 enteros, punto y 2 decimales (ej: 05.23)
+                            txt_ant = f"{txt_dias} {horas:02d}:{minutos:02d}:{segundos:05.2f} h"
+                        else:
+                            txt_ant = "0 días 00:00:00.00 h"
 
-                        # Solo definimos el color, NO usamos 'selected=True'
+                        txt_intentos = f"{promedio_intentos:.2f}".replace('.', ',')
+                        txt_efectividad = f"{efectividad:.2f} %".replace('.', ',')
+
                         color_fila = "#8B0000" if user == self.usuario_seleccionado_ranking else None
                         
-                        # Definimos el evento click para ESTE usuario
-                        # Usamos 'u=user' para capturar el valor en el lambda
                         evento_click = lambda e, u=user: self._seleccionar_fila_ranking(u)
 
                         filas_ranking.append(ft.DataRow(
                             cells=[
-                                # Agregamos on_click a CADA Container de la fila
                                 ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(user, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(str(total), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=100, alignment=ft.alignment.center, on_click=evento_click)),
@@ -2583,11 +2602,11 @@ El Sistema.
                                 ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(str(fila[5]), color="cyan", weight=ft.FontWeight.BOLD), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(txt_ant, color="cyan"), width=200, alignment=ft.alignment.center, on_click=evento_click)),
+                                # Celda de Anticipación con el nuevo texto
+                                ft.DataCell(ft.Container(content=ft.Text(txt_ant, color="cyan", size=12), width=200, alignment=ft.alignment.center, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(txt_intentos, color="cyan"), width=80, alignment=ft.alignment.center, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center, on_click=evento_click)),
                             ],
-                            # QUITAMOS on_select_changed y selected para evitar el destello/hover
                             color=color_fila,
                             data=user 
                         ))
@@ -2610,14 +2629,14 @@ El Sistema.
                     self.tabla_copas.rows = filas_copas
 
                 # ------------------------------------------
-                # 3. PARTIDOS (Ya estaba bien)
+                # 3. PARTIDOS
                 # ------------------------------------------
                 if actualizar_partidos:
                     datos_partidos_user = bd.obtener_partidos(
                         self.usuario_actual, 
                         filtro_tiempo=self.filtro_temporal, 
                         edicion_id=self.filtro_edicion_id, 
-                        rival_id=self.filtro_rival_id,
+                        rival_id=self.filtro_rival_id, 
                         solo_sin_pronosticar=self.filtro_sin_pronosticar
                     )
                     filas_tabla_partidos = []
@@ -2653,7 +2672,6 @@ El Sistema.
 
                         color_fila = "#8B0000" if p_id == self.partido_a_pronosticar_id else None
 
-                        # Evento click reutilizable
                         evt_click = lambda e, id=p_id: self._seleccionar_partido_click(id)
 
                         filas_tabla_partidos.append(ft.DataRow(
@@ -2672,7 +2690,7 @@ El Sistema.
                     self.tabla_partidos.rows = filas_tabla_partidos
 
                 # ------------------------------------------
-                # 4. PRONÓSTICOS (Corregido: Click en celdas, sin hover nativo)
+                # 4. PRONÓSTICOS
                 # ------------------------------------------
                 if actualizar_pronosticos:
                     datos_raw = bd.obtener_todos_pronosticos()
@@ -2716,7 +2734,6 @@ El Sistema.
                         row_key = hash(row)
                         color_fila_pron = "#8B0000" if row_key == self.pronostico_seleccionado_key else None
                         
-                        # Evento click reutilizable
                         evt_click_pron = lambda e, k=row_key: self._seleccionar_fila_pronostico(k)
 
                         filas_filtradas.append(ft.DataRow(
@@ -2731,7 +2748,6 @@ El Sistema.
                                 ft.DataCell(ft.Container(content=ft.Text(puntos_disp, color="green", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center, on_click=evt_click_pron)),
                                 ft.DataCell(ft.Container(content=ft.Text(err_disp, color=color_err, weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)),
                             ],
-                            # QUITAMOS on_select_changed y selected
                             color=color_fila_pron,
                             data=row_key 
                         ))
