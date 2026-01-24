@@ -646,6 +646,18 @@ El Sistema.
             on_click=self._abrir_modal_mejor_predictor
         )
 
+        # BOTÓN: Cambios de pronóstico
+        self.btn_cambios_pronostico = ft.ElevatedButton(
+            "Cambios de pronóstico", 
+            icon=ft.icons.EDIT_NOTE, 
+            bgcolor="#333333", 
+            color="white", 
+            width=180, 
+            height=45, 
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_modal_cambios_pronostico
+        )
+
         # Botón 5: Racha Actual
         self.btn_racha_actual = ft.ElevatedButton(
             "Racha actual", 
@@ -703,7 +715,8 @@ El Sistema.
                         scroll=ft.ScrollMode.AUTO,
                         controls=[
                             self.btn_mufa, 
-                            self.btn_mejor_predictor
+                            self.btn_mejor_predictor,
+                            self.btn_cambios_pronostico
                         ]
                     ),
                     
@@ -2467,7 +2480,6 @@ El Sistema.
                     color_estilo = "white30"
 
                 filas.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
                     ft.DataCell(ft.Container(content=ft.Text(user, weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
                     ft.DataCell(ft.Container(content=ft.Text(txt_tiempo, color="cyan", weight="bold"), width=120, alignment=ft.alignment.center)),
                     ft.DataCell(ft.Container(content=ft.Text(estilo, color=color_estilo, weight="bold", size=15), width=180, alignment=ft.alignment.center_left)),
@@ -2476,7 +2488,6 @@ El Sistema.
             # 3. CONSTRUIR TABLA
             tabla = ft.DataTable(
                 columns=[
-                    ft.DataColumn(ft.Container(content=ft.Text("Pos", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
                     ft.DataColumn(ft.Container(content=ft.Text("Usuario", weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
                     ft.DataColumn(ft.Container(content=ft.Text("Anticipación\nPromedio", text_align="center", weight="bold", color="white"), width=120, alignment=ft.alignment.center)),
                     ft.DataColumn(ft.Container(content=ft.Text("Estilo", weight="bold", color="white"), width=180, alignment=ft.alignment.center_left)),
@@ -2577,6 +2588,153 @@ El Sistema.
             GestorMensajes.mostrar(self.page, "Error", f"No se pudo cargar mufa: {ex}", "error")
             return   
 
+    def _abrir_modal_cambios_pronostico(self, e):
+        """
+        Muestra la tabla de 'Estabilidad de Pronósticos'.
+        Clasificación basada en la cantidad promedio de pronósticos por partido.
+        Ordenada alfabéticamente por usuario.
+        """
+        
+        # Título dinámico
+        titulo = "Estadísticas de Estabilidad"
+        if self.filtro_ranking_nombre: 
+             titulo = f"Estabilidad ({self.filtro_ranking_nombre})"
+        elif self.filtro_ranking_anio:
+             titulo = f"Estabilidad ({self.filtro_ranking_anio})"
+             
+        self.loading_modal = ft.ProgressBar(width=200, color="amber", bgcolor="#222222")
+        self.txt_estado_modal = ft.Text("Analizando historial de cambios...", color="white70", size=12)
+        
+        columna_content = ft.Column(
+            controls=[
+                ft.Text(titulo, size=18, weight="bold", color="white"),
+                ft.Container(height=10),
+                self.loading_modal,
+                self.txt_estado_modal,
+                ft.Container(height=20)
+            ],
+            height=150,
+            width=600, # Ajustado el ancho al tener una columna menos
+            scroll=None
+        )
+        
+        self.dlg_cambios = ft.AlertDialog(content=columna_content, modal=True)
+        self.page.open(self.dlg_cambios)
+
+        def _cargar():
+            time.sleep(0.5)
+            bd = BaseDeDatos()
+            
+            # 1. VALIDACIÓN: Verificar si hay datos del PASADO
+            partidos_jugados = bd.obtener_partidos(
+                self.usuario_actual, 
+                filtro_tiempo='jugados', 
+                edicion_id=self.filtro_ranking_edicion_id
+            )
+            datos_ranking = bd.obtener_ranking(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
+            
+            datos_validos = False
+            if partidos_jugados:
+                for row in datos_ranking:
+                    # row[7] es el promedio de intentos (calculado solo con partidos jugados)
+                    if row[7] and float(row[7]) > 0: 
+                        datos_validos = True
+                        break
+            
+            if not partidos_jugados and not datos_validos:
+                self.loading_modal.visible = False
+                self.txt_estado_modal.value = ""
+                
+                columna_content.controls = [
+                    ft.Text(titulo, size=18, weight="bold", color="white"),
+                    ft.Container(height=20),
+                    ft.Column([
+                        ft.Icon(ft.icons.WARNING_AMBER_ROUNDED, color="yellow", size=50),
+                        ft.Text("No hay datos históricos", size=16, weight="bold", color="white"),
+                        ft.Text("Se requieren partidos pasados para calcular estos promedios.", size=14, color="white70"),
+                    ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                    ft.Container(height=20),
+                    ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_cambios))], alignment=ft.MainAxisAlignment.END)
+                ]
+                self.dlg_cambios.update()
+                return
+
+            # 2. PROCESAR Y ORDENAR
+            # Orden alfabético por nombre de usuario (row[0])
+            datos_ranking.sort(key=lambda x: x[0].lower())
+
+            filas = []
+            for row in datos_ranking:
+                user = row[0]
+                promedio_cambios = row[7] 
+                
+                # Solo mostramos usuarios que hayan participado (promedio > 0)
+                if not promedio_cambios or float(promedio_cambios) == 0:
+                    continue
+
+                # Formateo de Promedio de Cambios y CLASIFICACIÓN
+                val_cambios = float(promedio_cambios)
+                txt_cambios = f"{val_cambios:.2f}".replace('.', ',')
+
+                # --- LÓGICA DE CLASIFICACIÓN ---
+                if val_cambios <= 1.10:
+                    estilo = "🧱 Firme"
+                    color_estilo = "brown"
+                elif val_cambios <= 1.50:
+                    estilo = "👍 Estable"
+                    color_estilo = "amber"
+                elif val_cambios <= 2.50:
+                    estilo = "🔄 Cambiante"
+                    color_estilo = "blue"
+                else:
+                    estilo = "📉 Muy volátil"
+                    color_estilo = "red"
+
+                filas.append(ft.DataRow(cells=[
+                    # Celda 1: Usuario
+                    ft.DataCell(ft.Container(content=ft.Text(user, weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
+                    # Celda 2: Promedio numérico
+                    ft.DataCell(ft.Container(content=ft.Text(txt_cambios, color="white", weight="bold"), width=120, alignment=ft.alignment.center)),
+                    # Celda 3: Clasificación
+                    ft.DataCell(ft.Container(content=ft.Text(estilo, color=color_estilo, weight="bold", size=14), width=180, alignment=ft.alignment.center_left)),
+                ]))
+
+            # 3. CONSTRUIR TABLA (Sin columna de anticipación)
+            tabla = ft.DataTable(
+                columns=[
+                    ft.DataColumn(ft.Container(content=ft.Text("Usuario", weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
+                    ft.DataColumn(ft.Container(content=ft.Text("Promedio de\npronósticos", text_align="center", weight="bold", color="white", tooltip="Promedio de veces que guardó pronóstico por partido"), width=120, alignment=ft.alignment.center), numeric=True),
+                    ft.DataColumn(ft.Container(content=ft.Text("Perfil", weight="bold", color="white"), width=180, alignment=ft.alignment.center_left)),
+                ],
+                rows=filas,
+                heading_row_color="black",
+                border=ft.border.all(1, "white10"),
+                column_spacing=10,
+                heading_row_height=60,
+                data_row_max_height=50,
+                data_row_min_height=50
+            )
+
+            columna_content.height = 400
+            columna_content.width = 600
+            
+            columna_content.controls = [
+                ft.Text(titulo, size=18, weight="bold", color="white"),
+                ft.Container(height=10),
+                ft.Container(
+                    height=270,
+                    content=ft.Column(
+                        controls=[tabla],
+                        scroll=ft.ScrollMode.AUTO
+                    )
+                ),
+                ft.Container(height=10),
+                ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_cambios))], alignment=ft.MainAxisAlignment.END)
+            ]
+            self.dlg_cambios.update()
+
+        threading.Thread(target=_cargar, daemon=True).start()
+        
     def _seleccionar_rival_admin(self, id_rival):
         """Maneja el clic en la tabla de administración de equipos (Sin Recarga de BD)."""
         self.rival_seleccionado_id = id_rival
@@ -2794,7 +2952,7 @@ El Sistema.
                             horas_totales = val_sec / 3600
                             
                             if horas_totales > 72:
-                                estilo_texto = "🧠 Planificador"
+                                estilo_texto = "🧠 Convencido temprano"
                                 estilo_color = "pink"
                             elif horas_totales > 24:
                                 estilo_texto = "🗓️ Anticipado"
