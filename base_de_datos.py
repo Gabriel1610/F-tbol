@@ -469,10 +469,10 @@ class BaseDeDatos:
 
             # 1. Filtro de Tiempo (Excluyente entre sí)
             if filtro_tiempo == 'futuros':
-                condiciones.append("p.fecha_hora > NOW()")
+                condiciones.append("p.fecha_hora > DATE_SUB(NOW(), INTERVAL 3 HOUR)")
                 orden_sql = "ASC"
             elif filtro_tiempo == 'jugados':
-                condiciones.append("p.fecha_hora <= NOW()")
+                condiciones.append("p.fecha_hora <= DATE_SUB(NOW(), INTERVAL 3 HOUR)")
                 orden_sql = "DESC"
             else: # 'todos'
                 orden_sql = "ASC" if filtro_tiempo == 'futuros' else "DESC"
@@ -489,7 +489,7 @@ class BaseDeDatos:
 
             # 4. Filtro Sin Pronosticar (Acumulativo)
             if solo_sin_pronosticar:
-                condiciones.append("p.fecha_hora > NOW()") # Redundancia de seguridad
+                condiciones.append("p.fecha_hora > DATE_SUB(NOW(), INTERVAL 3 HOUR)") # Redundancia de seguridad
                 condiciones.append("pr.pred_goles_independiente IS NULL")
 
             # Unir condiciones
@@ -1441,9 +1441,13 @@ class BaseDeDatos:
 
     def obtener_ranking(self, edicion_id=None, anio=None):
         """
-        Calcula el ranking incluyendo efectividad y ahora devuelve también el 
-        total de partidos del contexto para calcular porcentajes de participación.
-        Retorna: ..., promedio_intentos, efectividad, total_partidos_contexto
+        Calcula el ranking de usuarios.
+        
+        LÓGICA DE ANTICIPACIÓN (Actualizada):
+        - Solo considera partidos del PASADO (fecha < ahora).
+        - Los partidos futuros NO cuentan (ni suman ni restan).
+        - Si un partido del pasado no se pronosticó, cuenta como 0 segundos.
+        - Si no hay partidos jugados en el torneo, el promedio es 0 para todos.
         """
         conexion = None
         cursor = None
@@ -1452,37 +1456,28 @@ class BaseDeDatos:
             cursor = conexion.cursor() 
 
             params = []
-
-            # 1. Filtros de Partidos Jugados
+            
+            # --- FILTROS DE EDICIÓN O AÑO ---
+            condicion_filtro = ""
             if edicion_id is not None:
-                sql_partidos_filtrados = """
-                    SELECT id, goles_independiente, goles_rival, fecha_hora 
-                    FROM partidos 
-                    WHERE goles_independiente IS NOT NULL AND edicion_id = %s
-                """
+                condicion_filtro = " AND e.id = %s "
                 params.append(edicion_id)
             elif anio is not None:
-                sql_partidos_filtrados = """
-                    SELECT p.id, p.goles_independiente, p.goles_rival, p.fecha_hora
-                    FROM partidos p
-                    JOIN ediciones e ON p.edicion_id = e.id 
-                    JOIN anios a ON e.anio_id = a.id 
-                    WHERE p.goles_independiente IS NOT NULL AND a.numero = %s
-                """
+                condicion_filtro = " AND a.numero = %s "
                 params.append(anio)
-            else:
-                sql_partidos_filtrados = """
-                    SELECT id, goles_independiente, goles_rival, fecha_hora
-                    FROM partidos 
-                    WHERE goles_independiente IS NOT NULL
-                """
+            
+            # SQL Scope Jugados (Para Puntos y Efectividad)
+            sql_scope_jugados = f"""
+                SELECT p.id, p.goles_independiente, p.goles_rival, p.fecha_hora
+                FROM partidos p
+                JOIN ediciones e ON p.edicion_id = e.id 
+                JOIN anios a ON e.anio_id = a.id 
+                WHERE p.goles_independiente IS NOT NULL {condicion_filtro}
+            """
 
-            # 2. Obtener Total de Partidos Jugados en el contexto (Necesario para %)
-            cursor.execute(f"SELECT COUNT(*) FROM ({sql_partidos_filtrados}) as t", tuple(params))
-            total_partidos_contexto = cursor.fetchone()[0]
-            if total_partidos_contexto == 0: total_partidos_contexto = 1
-
-            # 3. Query Principal
+            # ---------------------------------------------------------------
+            # QUERY PRINCIPAL
+            # ---------------------------------------------------------------
             sql = f"""
             SELECT 
                 u.username,
@@ -1499,23 +1494,61 @@ class BaseDeDatos:
                 COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END), 0) AS pts_cai,
                 COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival,
 
-                -- [5] Cantidad de partidos distintos pronosticados (Participación)
+                -- [5] Cantidad de partidos jugados (para efectividad)
                 COUNT(p.id) as cant_pronosticos,
                 
-                -- [6] Promedio de anticipación
-                AVG(TIMESTAMPDIFF(SECOND, pr.fecha_prediccion, p.fecha_hora)) as avg_anticipacion_segundos,
+                -- [6] ANTICIPACIÓN PROMEDIO (SOLO PASADO)
+                COALESCE(MAX(anti.promedio_segundos), 0) as avg_anticipacion_segundos,
                 
-                -- [7] Columna Auxiliar: Total de intentos (para promedio intentos)
+                -- [7] Promedio de intentos
                 COALESCE(MAX(att.total_intentos), 0) as total_intentos_raw,
 
-                -- [8] Cantidad de Aciertos Exactos (Plenos)
+                -- [8] Aciertos Exactos
                 COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente AND p.goles_rival = pr.pred_goles_rival THEN 1 ELSE 0 END), 0) as cant_exactos
 
             FROM usuarios u
             
-            -- Join para obtener el ÚLTIMO pronóstico
+            -- JOIN 1: ANTICIPACIÓN (Lógica Estricta: Solo Pasado)
             LEFT JOIN (
-                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival, p1.fecha_prediccion
+                SELECT 
+                    u_sub.id as uid,
+                    SUM(
+                        CASE 
+                            -- Si pronosticó, calculamos la diferencia
+                            WHEN pr_all.fecha_prediccion IS NOT NULL THEN TIMESTAMPDIFF(SECOND, pr_all.fecha_prediccion, p_all.fecha_hora)
+                            -- Si NO pronosticó y es partido pasado, penalización máxima (0 segundos de anticipación)
+                            ELSE 0 
+                        END
+                    ) / COUNT(p_all.id) as promedio_segundos
+                FROM usuarios u_sub
+                -- Cruzamos usuarios con TODOS los partidos del filtro que ya sean PASADO
+                CROSS JOIN partidos p_all
+                JOIN ediciones e ON p_all.edicion_id = e.id
+                JOIN anios a ON e.anio_id = a.id
+                
+                -- Unimos con el ÚLTIMO pronóstico disponible
+                LEFT JOIN (
+                    SELECT p1.usuario_id, p1.partido_id, p1.fecha_prediccion
+                    FROM pronosticos p1
+                    INNER JOIN (
+                        SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                        FROM pronosticos
+                        GROUP BY usuario_id, partido_id
+                    ) p2 ON p1.usuario_id = p2.usuario_id 
+                        AND p1.partido_id = p2.partido_id 
+                        AND p1.fecha_prediccion = p2.max_fecha
+                ) pr_all ON u_sub.id = pr_all.usuario_id AND p_all.id = pr_all.partido_id
+                
+                WHERE 
+                    1=1 {condicion_filtro} -- Filtro torneo/año
+                    AND p_all.fecha_hora < DATE_SUB(NOW(), INTERVAL 3 HOUR) -- SOLO PARTIDOS DEL PASADO
+                
+                GROUP BY u_sub.id
+            ) anti ON u.id = anti.uid
+
+            -- JOIN 2: PUNTOS (Solo Partidos Jugados y con Resultado)
+            LEFT JOIN (
+                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
                 FROM pronosticos p1
                 INNER JOIN (
                     SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
@@ -1526,13 +1559,13 @@ class BaseDeDatos:
                     AND p1.fecha_prediccion = p2.max_fecha
             ) pr ON u.id = pr.usuario_id
             
-            LEFT JOIN ({sql_partidos_filtrados}) p ON pr.partido_id = p.id
+            LEFT JOIN ({sql_scope_jugados}) p ON pr.partido_id = p.id
             
-            -- Join para contar TODOS los intentos históricos
+            -- JOIN 3: INTENTOS
             LEFT JOIN (
                 SELECT pr2.usuario_id, COUNT(*) as total_intentos
                 FROM pronosticos pr2
-                JOIN ({sql_partidos_filtrados}) p_scope ON pr2.partido_id = p_scope.id
+                JOIN ({sql_scope_jugados}) p_scope ON pr2.partido_id = p_scope.id
                 GROUP BY pr2.usuario_id
             ) att ON u.id = att.usuario_id
             
@@ -1540,11 +1573,12 @@ class BaseDeDatos:
             ORDER BY 
                 total DESC,
                 cant_pronosticos DESC,
-                avg_anticipacion_segundos DESC,
+                avg_anticipacion_segundos DESC, 
                 (COALESCE(MAX(att.total_intentos), 0) / NULLIF(COUNT(p.id), 0)) ASC;
             """
             
-            cursor.execute(sql, tuple(params * 2))
+            # Parametros x3: 1 para Anti, 1 para Puntos, 1 para Intentos
+            cursor.execute(sql, tuple(params * 3))
             filas = cursor.fetchall()
             
             resultados_procesados = []
@@ -1553,7 +1587,6 @@ class BaseDeDatos:
                 total_intentos = row[7]
                 cant_exactos = row[8]
                 
-                # Criterio 4: Promedio Intentos
                 if cant_pronosticos > 0:
                     promedio_intentos = total_intentos / cant_pronosticos
                     efectividad = (cant_exactos / cant_pronosticos) * 100
@@ -1561,15 +1594,9 @@ class BaseDeDatos:
                     promedio_intentos = 0
                     efectividad = 0.0
                 
-                # Armamos la fila final:
-                # 0-6: Datos estándar
-                # 7: Promedio Intentos
-                # 8: Efectividad
-                # 9: Total Partidos Contexto (NUEVO, para calcular % en UI)
                 lista_row = list(row[:7])
                 lista_row.append(promedio_intentos) 
                 lista_row.append(efectividad)
-                lista_row.append(total_partidos_contexto) 
                 resultados_procesados.append(lista_row)
                 
             return resultados_procesados
@@ -1580,7 +1607,7 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
-    
+
     def obtener_indice_optimismo_pesimismo(self, edicion_id=None, anio=None):
         """
         Calcula el índice unificado de Optimismo/Pesimismo mostrando a TODOS los usuarios.
@@ -1716,13 +1743,13 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
-    # --- AGREGAR AL FINAL DE LA CLASE BaseDeDatos ---
-
     def obtener_pendientes_notificacion(self, dias=5):
         """
         Obtiene una lista de usuarios que tienen partidos sin pronosticar 
         en los próximos 'dias' y que NO han sido notificados hoy.
         Retorna: Lista de tuplas (id_usuario, username, email, rival_nombre, fecha_partido)
+        
+        AJUSTE HORARIO: Se resta 3 horas a NOW() para compensar el horario de TiDB.
         """
         conexion = None
         cursor = None
@@ -1733,12 +1760,12 @@ class BaseDeDatos:
             # La lógica es:
             # 1. Traer partidos futuros dentro del rango de días.
             # 2. Cruzar con usuarios que tienen email.
-            # 3. Filtrar usuarios que YA fueron notificados HOY (DATE(now) > DATE(ultima_notif)).
+            # 3. Filtrar usuarios notificados HOY (usando hora ajustada).
             # 4. Excluir combinaciones (Usuario-Partido) que YA tienen pronóstico.
             
             sql = f"""
             SELECT 
-                u.id, 
+                DISTINCT u.id, 
                 u.username, 
                 u.email, 
                 r.nombre, 
@@ -1748,11 +1775,19 @@ class BaseDeDatos:
             CROSS JOIN usuarios u
             LEFT JOIN pronosticos pr ON p.id = pr.partido_id AND u.id = pr.usuario_id
             WHERE 
-                p.fecha_hora >= NOW() 
-                AND p.fecha_hora <= DATE_ADD(NOW(), INTERVAL %s DAY)
+                -- Filtro de partidos próximos (Ajustado a hora ARG)
+                p.fecha_hora >= DATE_SUB(NOW(), INTERVAL 3 HOUR)
+                AND p.fecha_hora <= DATE_ADD(DATE_SUB(NOW(), INTERVAL 3 HOUR), INTERVAL %s DAY)
+                
                 AND pr.id IS NULL -- Que NO tenga pronóstico
                 AND u.email IS NOT NULL -- Que tenga email
-                AND (u.fecha_ultima_notificacion IS NULL OR DATE(u.fecha_ultima_notificacion) < CURDATE())
+                
+                -- Verificación de última notificación (Ajustado a fecha ARG)
+                -- Si 'fecha_ultima_notificacion' es NULL O es de un día anterior al "Hoy Argentino"
+                AND (
+                    u.fecha_ultima_notificacion IS NULL 
+                    OR DATE(u.fecha_ultima_notificacion) < DATE(DATE_SUB(NOW(), INTERVAL 3 HOUR))
+                )
             ORDER BY u.id, p.fecha_hora ASC
             """
             
@@ -1774,7 +1809,7 @@ class BaseDeDatos:
             conexion = self.abrir()
             cursor = conexion.cursor()
             
-            sql = "UPDATE usuarios SET fecha_ultima_notificacion = NOW() WHERE id = %s"
+            sql = "UPDATE usuarios SET fecha_ultima_notificacion = DATE_SUB(NOW(), INTERVAL 3 HOUR) WHERE id = %s"
             cursor.execute(sql, (usuario_id,))
             conexion.commit()
             return True

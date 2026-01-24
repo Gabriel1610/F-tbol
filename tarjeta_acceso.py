@@ -28,7 +28,7 @@ class TarjetaAcceso(ft.Container):
         t_ing = ft.Text("YA TENGO CUENTA", size=20, weight=ft.FontWeight.BOLD, color=Estilos.COLOR_BLANCO)
 
         # --- CAMPOS REGISTRO ---
-        self.user_reg = ft.TextField(label="Nombre de usuario o correo electrónico", on_change=self._validar_registro, **Estilos.INPUT_CONFIG)
+        self.user_reg = ft.TextField(label="Nombre de usuario", on_change=self._validar_registro, **Estilos.INPUT_CONFIG)
         
         # NUEVO CAMPO EMAIL
         self.email_reg = ft.TextField(label="Correo Electrónico", on_change=self._validar_registro, **Estilos.INPUT_CONFIG)
@@ -148,7 +148,9 @@ class TarjetaAcceso(ft.Container):
                 
                 # 3. Enviar Correo
                 VentanaCarga.mostrar(self.page_principal, "Enviando código de verificación...")
-                gestor.enviar_codigo_recuperacion(email, codigo)
+                
+                # --- CAMBIO AQUÍ: Usamos es_registro=True ---
+                gestor.enviar_codigo(email, codigo, es_registro=True)
                 
                 VentanaCarga.cerrar(self.page_principal)
                 
@@ -282,7 +284,11 @@ class TarjetaAcceso(ft.Container):
                 
                 # Enviar
                 VentanaCarga.mostrar(self.page_principal, f"Enviando correo a {email[:3]}***...")
-                gestor.enviar_codigo_recuperacion(email, codigo)
+                
+                # --- CAMBIO AQUÍ: Usamos es_registro=False ---
+                # Antes decía: gestor.enviar_codigo_recuperacion(email, codigo)
+                gestor.enviar_codigo(email, codigo, es_registro=False)
+                
                 VentanaCarga.cerrar(self.page_principal)
                 
                 # Ir al paso 3
