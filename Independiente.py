@@ -365,73 +365,101 @@ El Sistema.
         self.txt_titulo_pronosticos.update()
 
     def _abrir_modal_falso_profeta(self, e):
-        """Muestra el ranking de 'Falso Profeta' (Quienes pronostican victoria y pierden/empatan)."""
-        try:
-            bd = BaseDeDatos()
-            datos = bd.obtener_ranking_falso_profeta(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
-            
-            filas = []
-            for i, fila in enumerate(datos, start=1):
-                user = fila[0]
-                victorias_pred = fila[1]
-                porcentaje_acierto = float(fila[2])
-                
-                # --- CAMBIO AQUÍ: Invertimos el porcentaje ---
-                porcentaje_falso = 100 - porcentaje_acierto
-                
-                txt_porcentaje = f"{porcentaje_falso:.1f}%".replace('.', ',')
-                
-                # Lógica de colores invertida (Alto % Falso Profeta es "malo/rojo")
-                if porcentaje_falso >= 80: color_txt = "red"      # Antes era acierto <= 20
-                elif porcentaje_falso >= 50: color_txt = "orange" # Antes era acierto <= 50
-                else: color_txt = "green"                         # Bajo % Falso es bueno
-                
-                filas.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(f"{i}º", color="white", weight=ft.FontWeight.BOLD)),
-                    ft.DataCell(ft.Text(user, color="white")),
-                    ft.DataCell(ft.Container(content=ft.Text(str(victorias_pred), color="cyan"), alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(txt_porcentaje, color=color_txt, weight=ft.FontWeight.BOLD), alignment=ft.alignment.center)),
-                ]))
+        """Muestra el ranking de 'Falso Profeta' con animación de carga."""
+        
+        # 1. Configuración inicial del modal (Estado Cargando)
+        self.loading_modal = ft.ProgressBar(width=200, color="amber", bgcolor="#222222")
+        
+        columna_content = ft.Column(
+            controls=[
+                ft.Text("Ranking Falso Profeta 🤡", size=18, weight="bold", color="white"),
+                ft.Text("Usuarios que más le erran cuando dicen que el Rojo va a ganar.", size=12, color="white70"),
+                ft.Container(height=10),
+                self.loading_modal,
+                ft.Container(height=50)
+            ],
+            height=150,
+            width=650,
+            scroll=None
+        )
+        
+        self.dlg_fp = ft.AlertDialog(content=columna_content, modal=True)
+        self.page.open(self.dlg_fp)
 
-            tabla = ft.DataTable(
-                columns=[
-                    ft.DataColumn(ft.Text("Pos")),
-                    ft.DataColumn(ft.Text("Usuario")),
-                    ft.DataColumn(ft.Text("Pred. Victoria", tooltip="Veces que dijo que ganábamos"), numeric=True),
-                    # --- CAMBIO DE TÍTULO DE COLUMNA ---
-                    ft.DataColumn(ft.Text("% Falso Profeta", tooltip="Porcentaje de veces que falló al predecir victoria"), numeric=True),
-                ],
-                rows=filas,
-                heading_row_color="black",
-                data_row_color={"hoverED": "#1A1A1A"},
-                border=ft.border.all(1, "white10"),
-                column_spacing=20,
-                # --- ALTURAS ESTANDARIZADAS ---
-                heading_row_height=60,
-                data_row_max_height=50,
-                data_row_min_height=50
-            )
+        def _cargar():
+            # Simulación visual breve (opcional, para que se note la animación)
+            time.sleep(0.3)
             
-            dlg = ft.AlertDialog(
-                title=ft.Text("Ranking Falso Profeta 🤡"),
-                content=ft.Column([
-                    ft.Text("Usuarios que más le erran cuando dicen que el Rojo va a ganar.", size=12, color="white70"),
+            try:
+                bd = BaseDeDatos()
+                datos = bd.obtener_ranking_falso_profeta(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
+                
+                filas = []
+                for i, fila in enumerate(datos, start=1):
+                    user = fila[0]
+                    victorias_pred = fila[1]
+                    porcentaje_acierto = float(fila[2])
                     
+                    # Cálculo: Invertimos el porcentaje para mostrar "Falsedad"
+                    porcentaje_falso = 100 - porcentaje_acierto
+                    
+                    txt_porcentaje = f"{porcentaje_falso:.1f}%".replace('.', ',')
+                    
+                    # Lógica de colores (Alto % Falso es "malo/rojo")
+                    if porcentaje_falso >= 80: color_txt = "red"
+                    elif porcentaje_falso >= 50: color_txt = "orange"
+                    else: color_txt = "green"
+                    
+                    filas.append(ft.DataRow(cells=[
+                        ft.DataCell(ft.Container(content=ft.Text(f"{i}º", color="white", weight=ft.FontWeight.BOLD), width=50, alignment=ft.alignment.center)),
+                        ft.DataCell(ft.Container(content=ft.Text(user, color="white"), width=150, alignment=ft.alignment.center_left)),
+                        ft.DataCell(ft.Container(content=ft.Text(str(victorias_pred), color="cyan"), width=120, alignment=ft.alignment.center)),
+                        ft.DataCell(ft.Container(content=ft.Text(txt_porcentaje, color=color_txt, weight=ft.FontWeight.BOLD), width=120, alignment=ft.alignment.center)),
+                    ]))
+
+                tabla = ft.DataTable(
+                    columns=[
+                        ft.DataColumn(ft.Container(content=ft.Text("Pos", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
+                        ft.DataColumn(ft.Container(content=ft.Text("Usuario", weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
+                        ft.DataColumn(ft.Container(content=ft.Text("Pred. Victoria", tooltip="Veces que dijo que ganábamos", weight="bold", color="white"), width=120, alignment=ft.alignment.center), numeric=True),
+                        ft.DataColumn(ft.Container(content=ft.Text("% Falso Profeta", tooltip="Porcentaje de veces que falló al predecir victoria", weight="bold", color="white"), width=120, alignment=ft.alignment.center), numeric=True),
+                    ],
+                    rows=filas,
+                    heading_row_color="black",
+                    data_row_color={"hoverED": "#1A1A1A"},
+                    border=ft.border.all(1, "white10"),
+                    column_spacing=10,
+                    heading_row_height=60,
+                    data_row_max_height=50,
+                    data_row_min_height=50
+                )
+                
+                # 3. Actualizar contenido del modal con la tabla
+                columna_content.height = 400
+                columna_content.width = 650
+                
+                columna_content.controls = [
+                    ft.Text("Ranking Falso Profeta 🤡", size=18, weight="bold", color="white"),
+                    ft.Text("Usuarios que más le erran cuando dicen que el Rojo va a ganar.", size=12, color="white70"),
+                    ft.Container(height=10),
                     ft.Container(
-                        # --- ALTURA VISIBLE: 270px (Header 60 + 4 filas de 50 + margen) ---
-                        height=270,
+                        height=270, # Altura visible (Header + 4 filas)
                         content=ft.Column(
                             controls=[tabla],
                             scroll=ft.ScrollMode.AUTO
                         )
-                    )
-                ], tight=True),
-                actions=[ft.TextButton("Cerrar", on_click=lambda e: self.page.close(dlg))]
-            )
-            self.page.open(dlg)
+                    ),
+                    ft.Container(height=10),
+                    ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_fp))], alignment=ft.MainAxisAlignment.END)
+                ]
+                self.dlg_fp.update()
 
-        except Exception as ex:
-            GestorMensajes.mostrar(self.page, "Error", f"No se pudo cargar falso profeta: {ex}", "error")
+            except Exception as ex:
+                self.page.close(self.dlg_fp)
+                GestorMensajes.mostrar(self.page, "Error", f"No se pudo cargar falso profeta: {ex}", "error")
+
+        # Ejecutar en hilo secundario
+        threading.Thread(target=_cargar, daemon=True).start()
 
     def _seleccionar_fila_ranking(self, usuario):
         """Marca visualmente la fila sin recargar datos ni activar selección nativa."""
@@ -554,7 +582,7 @@ El Sistema.
             leading_width=50,
             title=ft.Text(f"Bienvenido, {usuario}", weight=ft.FontWeight.BOLD, color=Estilos.COLOR_ROJO_CAI),
             center_title=False, bgcolor="white", 
-            actions=[ft.IconButton(icon=ft.icons.LOGOUT, tooltip="Cerrar Sesión", icon_color=Estilos.COLOR_ROJO_CAI, on_click=self._cerrar_sesion), ft.Container(width=10)]
+            actions=[ft.IconButton(icon=ft.Icons.LOGOUT, tooltip="Cerrar Sesión", icon_color=Estilos.COLOR_ROJO_CAI, on_click=self._cerrar_sesion), ft.Container(width=10)]
         )
 
         # --- BARRAS DE CARGA ---
@@ -566,20 +594,144 @@ El Sistema.
         self.loading_copas = ft.ProgressBar(width=400, color="amber", bgcolor="#222222", visible=False)
         
         # --- CONTENEDOR 1: FILTROS ---
-        self.btn_ranking_torneo = ft.ElevatedButton("Por torneo", icon=ft.icons.EMOJI_EVENTS, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_torneo_ranking)
-        self.btn_ranking_anio = ft.ElevatedButton("Por año", icon=ft.icons.CALENDAR_MONTH, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_anio_ranking)
+        self.btn_ranking_torneo = ft.ElevatedButton(
+            "Por torneo", 
+            icon=ft.Icons.EMOJI_EVENTS, 
+            bgcolor="#333333", 
+            color="white", 
+            width=140, 
+            height=30, 
+            tooltip="Filtra la tabla de posiciones y estadísticas para un torneo específico.",
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_selector_torneo_ranking
+        )
+        
+        self.btn_ranking_anio = ft.ElevatedButton(
+            "Por año", 
+            icon=ft.Icons.CALENDAR_MONTH, 
+            bgcolor="#333333", 
+            color="white", 
+            width=140, 
+            height=30, 
+            tooltip="Filtra la tabla de posiciones y estadísticas por año calendario.",
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_selector_anio_ranking
+        )
 
-        self.contenedor_filtro_torneo = ft.Container(padding=ft.padding.all(10), border=ft.border.all(1, "white24"), border_radius=8, bgcolor="#1E1E1E", content=ft.Column(spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER, controls=[ft.Text("Filtros", size=11, weight=ft.FontWeight.BOLD, color="white54"), self.btn_ranking_torneo, self.btn_ranking_anio]))
+        self.contenedor_filtro_torneo = ft.Container(
+            padding=ft.padding.all(10), 
+            border=ft.border.all(1, "white24"), 
+            border_radius=8, 
+            bgcolor="#1E1E1E", 
+            content=ft.Column(
+                spacing=10, 
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER, 
+                controls=[
+                    ft.Text("Filtros", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
+                    self.btn_ranking_torneo, 
+                    self.btn_ranking_anio
+                ]
+            )
+        )
 
+        # --- CONTENEDOR 5: GRÁFICOS DE TORTA ---
+        self.btn_grafico_torta_estilo = ft.ElevatedButton(
+            "Resultados pronosticados", 
+            icon=ft.Icons.PIE_CHART, 
+            bgcolor="#333333", 
+            color="white", 
+            width=160, 
+            height=30, 
+            tooltip="Muestra el porcentaje histórico de victorias, empates y derrotas pronosticadas por un usuario.",
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_selector_grafico_torta
+        )
+
+        self.contenedor_graficos_torta = ft.Container(
+            padding=ft.padding.all(10), 
+            border=ft.border.all(1, "white24"), 
+            border_radius=8, 
+            bgcolor="#1E1E1E", 
+            content=ft.Column(
+                spacing=10, 
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER, 
+                controls=[
+                    ft.Text("Gráficos de torta", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
+                    self.btn_grafico_torta_estilo
+                ]
+            )
+        )
+        
         # --- CONTENEDOR 2: GRÁFICOS DE LÍNEA ---
-        self.btn_grafico_puestos = ft.ElevatedButton("Por puestos", icon=ft.icons.SHOW_CHART, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_puestos)
-        self.btn_grafico_linea_puntos = ft.ElevatedButton("Por puntos", icon=ft.icons.SHOW_CHART, bgcolor="#333333", color="white", width=140, height=30, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_linea_puntos)
+        self.btn_grafico_puestos = ft.ElevatedButton(
+            "Por puestos", 
+            icon=ft.Icons.SHOW_CHART, 
+            bgcolor="#333333", 
+            color="white", 
+            width=140, 
+            height=30, 
+            tooltip="Visualiza la evolución del ranking (subidas y bajadas) fecha a fecha.",
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_selector_grafico_puestos
+        )
+        
+        self.btn_grafico_linea_puntos = ft.ElevatedButton(
+            "Por puntos", 
+            icon=ft.Icons.SHOW_CHART, 
+            bgcolor="#333333", 
+            color="white", 
+            width=140, 
+            height=30, 
+            tooltip="Visualiza la acumulación de puntos a lo largo del tiempo comparando usuarios.",
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_selector_grafico_linea_puntos
+        )
+
+        self.contenedor_graficos = ft.Container(
+            padding=ft.padding.all(10), 
+            border=ft.border.all(1, "white24"), 
+            border_radius=8, 
+            bgcolor="#1E1E1E", 
+            content=ft.Column(
+                spacing=10, 
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER, 
+                controls=[
+                    ft.Text("Gráficos de línea", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
+                    self.btn_grafico_puestos, 
+                    self.btn_grafico_linea_puntos
+                ]
+            )
+        )
 
         self.contenedor_graficos = ft.Container(padding=ft.padding.all(10), border=ft.border.all(1, "white24"), border_radius=8, bgcolor="#1E1E1E", content=ft.Column(spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER, controls=[ft.Text("Gráficos de línea", size=11, weight=ft.FontWeight.BOLD, color="white54"), self.btn_grafico_puestos, self.btn_grafico_linea_puntos]))
 
         # --- CONTENEDOR 3: GRÁFICOS DE BARRA ---
-        self.btn_grafico_barras_puntos = ft.ElevatedButton("Puntos por partidos", icon=ft.icons.BAR_CHART, bgcolor="#333333", color="white", width=140, height=45, style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), on_click=self._abrir_selector_grafico_barras)
-        self.contenedor_graficos_barra = ft.Container(padding=ft.padding.all(10), border=ft.border.all(1, "white24"), border_radius=8, bgcolor="#1E1E1E", content=ft.Column(spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER, controls=[ft.Text("Gráficos de barra", size=11, weight=ft.FontWeight.BOLD, color="white54"), self.btn_grafico_barras_puntos]))
+        self.btn_grafico_barras_puntos = ft.ElevatedButton(
+            "Puntos por partidos", 
+            icon=ft.Icons.BAR_CHART, 
+            bgcolor="#333333", 
+            color="white", 
+            width=140, 
+            height=45, 
+            tooltip="Muestra cuántos puntos sumó un usuario en cada partido individual (9, 6, 3 o 0).",
+            style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
+            on_click=self._abrir_selector_grafico_barras
+        )
+        
+        self.contenedor_graficos_barra = ft.Container(
+            padding=ft.padding.all(10), 
+            border=ft.border.all(1, "white24"), 
+            border_radius=8, 
+            bgcolor="#1E1E1E", 
+            content=ft.Column(
+                spacing=10, 
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER, 
+                controls=[
+                    ft.Text("Gráficos de barra", size=11, weight=ft.FontWeight.BOLD, color="white54"), 
+                    self.btn_grafico_barras_puntos
+                ]
+            )
+        )
 
         # --- CONTENEDOR 4: RANKINGS (FUSIÓN ÍNDICES Y FALSO PROFETA) ---
         
@@ -594,7 +746,8 @@ El Sistema.
             bgcolor="#333333", 
             color="white", 
             width=180, 
-            height=45, 
+            height=45,
+            tooltip="Compara la diferencia de gol que pronosticaste contra la realidad.\n(+) Optimista | (-) Pesimista", 
             style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
             on_click=self._abrir_modal_opt_pes
         )
@@ -607,17 +760,19 @@ El Sistema.
             color="white", 
             width=140, 
             height=45, 
+            tooltip="Usuarios que pronostican que el Rojo gana y finalmente no gana.",
             style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
             on_click=self._abrir_modal_falso_profeta
         )
 
         self.btn_estilo_decision = ft.ElevatedButton(
             "Estilo de decisión", 
-            icon=ft.icons.PSYCHOLOGY, # Icono de cerebro/psicología
+            icon=ft.Icons.PSYCHOLOGY, 
             bgcolor="#333333", 
             color="white", 
             width=180, 
             height=45, 
+            tooltip="Clasifica tu perfil (Planificador vs Impulsivo) según la anticipación promedio de tus pronósticos.",
             style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
             on_click=self._abrir_modal_estilo_decision
         )
@@ -630,6 +785,7 @@ El Sistema.
             color="white", 
             width=140, 
             height=45, 
+            tooltip="Porcentaje de acierto cuando pronosticas que el Rojo pierde.",
             style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
             on_click=self._abrir_modal_mufa
         )
@@ -642,6 +798,7 @@ El Sistema.
             color="white", 
             width=140, 
             height=45, 
+            tooltip="Ranking basado en la precisión exacta de goles (menor error absoluto promedio).",
             style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
             on_click=self._abrir_modal_mejor_predictor
         )
@@ -649,11 +806,12 @@ El Sistema.
         # BOTÓN: Cambios de pronóstico
         self.btn_cambios_pronostico = ft.ElevatedButton(
             "Cambios de pronóstico", 
-            icon=ft.icons.EDIT_NOTE, 
+            icon=ft.Icons.EDIT_NOTE, 
             bgcolor="#333333", 
             color="white", 
             width=180, 
             height=45, 
+            tooltip="Mide tu estabilidad o volatilidad según la cantidad de veces que cambias un resultado.",
             style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
             on_click=self._abrir_modal_cambios_pronostico
         )
@@ -666,6 +824,7 @@ El Sistema.
             color="white", 
             width=140, 
             height=45, 
+            tooltip="Cantidad de partidos consecutivos que llevas sumando puntos actualmente.",
             style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
             on_click=self._abrir_modal_racha_actual
         )
@@ -678,6 +837,7 @@ El Sistema.
             color="white", 
             width=140, 
             height=45, 
+            tooltip="Tu mejor seguidilla histórica de partidos sumando puntos sin cortar.",
             style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
             on_click=self._abrir_modal_racha_record
         )
@@ -737,7 +897,7 @@ El Sistema.
         # --- CONTROLES FORMULARIO PRONÓSTICOS ---
         self.input_pred_cai = ft.TextField(label="Goles CAI", width=80, text_align=ft.TextAlign.CENTER, keyboard_type=ft.KeyboardType.NUMBER, max_length=2, bgcolor="#2D2D2D", border_color="white24", color="white", on_change=self._validar_solo_numeros)
         self.input_pred_rival = ft.TextField(label="Goles Rival", width=110, text_align=ft.TextAlign.CENTER, keyboard_type=ft.KeyboardType.NUMBER, max_length=2, bgcolor="#2D2D2D", border_color="white24", color="white", on_change=self._validar_solo_numeros)
-        self.btn_pronosticar = ft.ElevatedButton("Pronosticar", icon=ft.icons.SPORTS_SOCCER, bgcolor="green", color="white", on_click=self._guardar_pronostico)
+        self.btn_pronosticar = ft.ElevatedButton("Pronosticar", icon=ft.Icons.SPORTS_SOCCER, bgcolor="green", color="white", on_click=self._guardar_pronostico)
 
         # --- TÍTULOS ---
         self.txt_titulo_ranking = ft.Text("Tabla de posiciones histórica", size=28, weight=ft.FontWeight.BOLD, color="white")
@@ -748,24 +908,24 @@ El Sistema.
 
         # --- BOTONES FILTROS (PESTAÑA PARTIDOS) ---
         # AHORA LLAMAN A _cambiar_filtro_tiempo_partidos
-        self.btn_todos = ft.ElevatedButton("Todos", icon=ft.icons.LIST, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_partidos('todos'))
-        self.btn_jugados = ft.ElevatedButton("Jugados", icon=ft.icons.HISTORY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_partidos('jugados'))
-        self.btn_por_jugar = ft.ElevatedButton("Por jugar", icon=ft.icons.UPCOMING, bgcolor="blue", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_partidos('futuros'))
+        self.btn_todos = ft.ElevatedButton("Todos", icon=ft.Icons.LIST, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_partidos('todos'))
+        self.btn_jugados = ft.ElevatedButton("Jugados", icon=ft.Icons.HISTORY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_partidos('jugados'))
+        self.btn_por_jugar = ft.ElevatedButton("Por jugar", icon=ft.Icons.UPCOMING, bgcolor="blue", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_partidos('futuros'))
         
         # Estos ahora gestionan su propio estado toggle
-        self.btn_por_torneo = ft.ElevatedButton("Por torneo", icon=ft.icons.EMOJI_EVENTS, bgcolor="#333333", color="white", on_click=self._abrir_selector_torneo)
-        self.btn_sin_pronosticar = ft.ElevatedButton("Sin pronosticar", icon=ft.icons.EVENT_BUSY, bgcolor="#333333", color="white", on_click=self._toggle_sin_pronosticar)
-        self.btn_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.icons.GROUPS, bgcolor="#333333", color="white", on_click=self._abrir_selector_equipo)
+        self.btn_por_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", on_click=self._abrir_selector_torneo)
+        self.btn_sin_pronosticar = ft.ElevatedButton("Sin pronosticar", icon=ft.Icons.EVENT_BUSY, bgcolor="#333333", color="white", on_click=self._toggle_sin_pronosticar)
+        self.btn_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=self._abrir_selector_equipo)
 
         # --- BOTONES FILTROS (PESTAÑA PRONÓSTICOS) ---
         # AHORA LLAMAN A _cambiar_filtro_tiempo_pronosticos (Nombre más claro)
-        self.btn_pron_todos = ft.ElevatedButton("Todos", icon=ft.icons.LIST, bgcolor="blue", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_pronosticos('todos'))
-        self.btn_pron_por_jugar = ft.ElevatedButton("Por jugar", icon=ft.icons.UPCOMING, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_pronosticos('futuros'))
-        self.btn_pron_jugados = ft.ElevatedButton("Jugados", icon=ft.icons.HISTORY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_pronosticos('jugados'))
+        self.btn_pron_todos = ft.ElevatedButton("Todos", icon=ft.Icons.LIST, bgcolor="blue", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_pronosticos('todos'))
+        self.btn_pron_por_jugar = ft.ElevatedButton("Por jugar", icon=ft.Icons.UPCOMING, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_pronosticos('futuros'))
+        self.btn_pron_jugados = ft.ElevatedButton("Jugados", icon=ft.Icons.HISTORY, bgcolor="#333333", color="white", on_click=lambda _: self._cambiar_filtro_tiempo_pronosticos('jugados'))
         
-        self.btn_pron_por_torneo = ft.ElevatedButton("Por torneo", icon=ft.icons.EMOJI_EVENTS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('torneo'))
-        self.btn_pron_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.icons.GROUPS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('equipo'))
-        self.btn_pron_por_usuario = ft.ElevatedButton("Por usuario", icon=ft.icons.PERSON, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('usuario'))
+        self.btn_pron_por_torneo = ft.ElevatedButton("Por torneo", icon=ft.Icons.EMOJI_EVENTS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('torneo'))
+        self.btn_pron_por_equipo = ft.ElevatedButton("Por equipo", icon=ft.Icons.GROUPS, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('equipo'))
+        self.btn_pron_por_usuario = ft.ElevatedButton("Por usuario", icon=ft.Icons.PERSON, bgcolor="#333333", color="white", on_click=lambda _: self._gestionar_accion_boton_filtro('usuario'))
 
         # --- COLUMNAS ---
         columnas_partidos = [
@@ -820,7 +980,7 @@ El Sistema.
 
         self.input_admin_nombre = ft.TextField(label="Nombre", width=250, bgcolor="#2D2D2D", color="white", border_color="white24")
         self.input_admin_otro = ft.TextField(label="Otro nombre", width=250, bgcolor="#2D2D2D", color="white", border_color="white24")
-        self.btn_guardar_rival = ft.ElevatedButton("Guardar", icon=ft.icons.SAVE, bgcolor="green", color="white", on_click=self._guardar_rival_admin)
+        self.btn_guardar_rival = ft.ElevatedButton("Guardar", icon=ft.Icons.SAVE, bgcolor="green", color="white", on_click=self._guardar_rival_admin)
 
         self.contenedor_admin_rivales = ft.Container(content=ft.Column(controls=[self.input_admin_nombre, self.input_admin_otro, ft.Container(height=10), self.btn_guardar_rival], horizontal_alignment=ft.CrossAxisAlignment.CENTER), padding=20)
 
@@ -955,13 +1115,29 @@ El Sistema.
                                 alignment=ft.MainAxisAlignment.START,
                                 vertical_alignment=ft.CrossAxisAlignment.START,
                                 controls=[
-                                    self.contenedor_filtro_torneo,
+                                    # COLUMNA 1: FILTROS Y ABAJO GRÁFICOS DE TORTA
+                                    ft.Column(
+                                        spacing=10,
+                                        controls=[
+                                            self.contenedor_filtro_torneo,
+                                            self.contenedor_graficos_torta
+                                        ]
+                                    ),
+                                    
                                     ft.Container(width=20),
+                                    
+                                    # COLUMNA 2: GRÁFICOS DE LÍNEA
                                     self.contenedor_graficos,
+                                    
                                     ft.Container(width=20),
+                                    
+                                    # COLUMNA 3: GRÁFICOS DE BARRA
                                     self.contenedor_graficos_barra,
+                                    
                                     ft.Container(width=20),
-                                    self.contenedor_indices # AHORA LLAMADO RANKINGS Y CONTIENE AMBOS BOTONES
+                                    
+                                    # COLUMNA 4: RANKINGS
+                                    self.contenedor_indices 
                                 ]
                             ),
                             
@@ -977,7 +1153,23 @@ El Sistema.
                                         controls=[
                                             self.txt_titulo_copas,
                                             self.loading_copas,
-                                            ft.Container(height=260, content=ft.Column(spacing=0, controls=[self.tabla_copas_header, ft.Container(height=240, content=ft.Column(scroll=ft.ScrollMode.ALWAYS, controls=[self.tabla_copas]))]))
+                                            # CAMBIO AQUÍ: height=310 (Antes 260)
+                                            ft.Container(
+                                                height=310, 
+                                                content=ft.Column(
+                                                    spacing=0, 
+                                                    controls=[
+                                                        self.tabla_copas_header, 
+                                                        ft.Container(
+                                                            height=240, # Esto ya estaba bien para 4 filas (4x60)
+                                                            content=ft.Column(
+                                                                scroll=ft.ScrollMode.ALWAYS, 
+                                                                controls=[self.tabla_copas]
+                                                            )
+                                                        )
+                                                    ]
+                                                )
+                                            )
                                         ]
                                     )
                                 ]
@@ -1114,7 +1306,7 @@ El Sistema.
             ),
             ft.Tab(
                 text="Configuración", 
-                icon=ft.icons.SETTINGS, 
+                icon=ft.Icons.SETTINGS, 
                 content=ft.Container(
                     padding=30, 
                     alignment=ft.alignment.top_left,
@@ -1495,12 +1687,19 @@ El Sistema.
             self.pronosticos_sort_col_index = e.column_index
             self.pronosticos_sort_asc = True
             
-        # Actualizamos la tabla para mostrar la flecha de orden inmediatamente
-        self.tabla_pronosticos.sort_column_index = self.pronosticos_sort_col_index
-        self.tabla_pronosticos.sort_ascending = self.pronosticos_sort_asc
+        # 1. Actualizamos la tabla de ENCABEZADO (Header) para que muestre la flecha
+        self.tabla_pronosticos_header.sort_column_index = self.pronosticos_sort_col_index
+        self.tabla_pronosticos_header.sort_ascending = self.pronosticos_sort_asc
+        
+        # 2. Reseteamos la tabla de DATOS (Cuerpo) para que NO muestre flecha
+        self.tabla_pronosticos.sort_column_index = None
+        self.tabla_pronosticos.sort_ascending = None
+        
+        # 3. Renderizamos cambios visuales en ambas tablas
+        self.tabla_pronosticos_header.update()
         self.tabla_pronosticos.update()
         
-        # Recargamos datos aplicando el orden
+        # 4. Recargamos datos aplicando el orden lógico
         self._recargar_datos(actualizar_pronosticos=True)
 
 # --- FUNCIONES GRÁFICO DE BARRAS (PUNTOS) ---
@@ -1515,7 +1714,7 @@ El Sistema.
         self.temp_anio_barra = None
         self.usuario_grafico_barra_sel = None 
         
-        self.btn_generar_grafico_barras = ft.ElevatedButton("Generar Gráfico", icon=ft.icons.BAR_CHART, disabled=True, on_click=self._generar_grafico_barras)
+        self.btn_generar_grafico_barras = ft.ElevatedButton("Generar Gráfico", icon=ft.Icons.BAR_CHART, disabled=True, on_click=self._generar_grafico_barras)
 
         def _cargar_datos():
             bd = BaseDeDatos()
@@ -1568,7 +1767,7 @@ El Sistema.
         self.temp_anio_graf_lp = None
         self.chk_usuarios_grafico_lp = [] 
         
-        self.btn_generar_grafico_lp = ft.ElevatedButton("Generar Gráfico", icon=ft.icons.SHOW_CHART, disabled=True, on_click=self._generar_grafico_linea_puntos)
+        self.btn_generar_grafico_lp = ft.ElevatedButton("Generar Gráfico", icon=ft.Icons.SHOW_CHART, disabled=True, on_click=self._generar_grafico_linea_puntos)
 
         def _cargar_datos_lp():
             bd = BaseDeDatos()
@@ -1758,7 +1957,7 @@ El Sistema.
                     ft.Row(
                         controls=[
                             ft.Text(f"Evolución Puntos: {self.temp_camp_graf_lp} {self.temp_anio_graf_lp}", size=24, weight="bold"),
-                            ft.IconButton(icon=ft.icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_lp_full))
+                            ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_lp_full))
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                     ),
@@ -1828,9 +2027,16 @@ El Sistema.
             bar_groups = []
             for i, puntos in enumerate(puntos_lista):
                 n_partido = i + 1
-                color_barra = ft.Colors.BLUE
-                if puntos == 0: color_barra = ft.Colors.GREY
-                elif puntos == MAXIMA_CANTIDAD_DE_PUNTOS: color_barra = ft.Colors.GREEN # Color especial para puntaje perfecto
+                
+                # --- LÓGICA DE COLORES MODIFICADA (HEX) ---
+                if puntos == 9:
+                    color_barra = "#0B8616"
+                elif puntos == 6:
+                    color_barra = "#FFFF00"
+                elif puntos == 3:
+                    color_barra = "#FF5100"
+                else:
+                    color_barra = ft.Colors.TRANSPARENT 
                 
                 bar_groups.append(
                     ft.BarChartGroup(
@@ -1867,7 +2073,7 @@ El Sistema.
                 ),
                 horizontal_grid_lines=ft.ChartGridLines(interval=1, color=ft.Colors.WHITE10, width=1),
                 min_y=0,
-                max_y=MAXIMA_CANTIDAD_DE_PUNTOS + 1, # Un poco de margen
+                max_y=MAXIMA_CANTIDAD_DE_PUNTOS + 1,
                 expand=True
             )
 
@@ -1882,7 +2088,7 @@ El Sistema.
                     ft.Row(
                         controls=[
                             ft.Text(f"Puntos de {self.usuario_grafico_barra_sel}: {self.temp_camp_barra} {self.temp_anio_barra}", size=24, weight="bold"),
-                            ft.IconButton(icon=ft.icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_barras_full))
+                            ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_barras_full))
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                     ),
@@ -2140,7 +2346,7 @@ El Sistema.
 
     def _abrir_selector_usuario_pronosticos(self, e):
         self.lv_usuarios = ft.ListView(expand=True, spacing=5, height=300)
-        self.btn_ver_usuario = ft.ElevatedButton("Ver", icon=ft.icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_usuario_pronosticos)
+        self.btn_ver_usuario = ft.ElevatedButton("Ver", icon=ft.Icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_usuario_pronosticos)
         
         def _cargar_usuarios_modal():
             try:
@@ -2191,7 +2397,7 @@ El Sistema.
         self.lv_anios = ft.ListView(expand=True, spacing=5, height=200)
         
         # El botón llama a _confirmar_filtro_torneo_pronosticos
-        self.btn_ver_torneo = ft.ElevatedButton("Ver", icon=ft.icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_torneo_pronosticos)
+        self.btn_ver_torneo = ft.ElevatedButton("Ver", icon=ft.Icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_torneo_pronosticos)
         
         def _cargar_datos_modal():
             try:
@@ -2238,7 +2444,7 @@ El Sistema.
     def _abrir_selector_equipo_pronosticos(self, e):
         self.lv_equipos = ft.ListView(expand=True, spacing=5, height=300)
         # El botón llama a _confirmar_filtro_equipo_pronosticos
-        self.btn_ver_equipo = ft.ElevatedButton("Ver", icon=ft.icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_equipo_pronosticos)
+        self.btn_ver_equipo = ft.ElevatedButton("Ver", icon=ft.Icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_equipo_pronosticos)
         
         def _cargar_rivales_modal():
             try:
@@ -2422,7 +2628,7 @@ El Sistema.
                     ft.Text(titulo, size=18, weight="bold", color="white"),
                     ft.Container(height=20),
                     ft.Column([
-                        ft.Icon(ft.icons.WARNING_AMBER_ROUNDED, color="yellow", size=50),
+                        ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color="yellow", size=50),
                         ft.Text("No hay datos suficientes", size=16, weight="bold", color="white"),
                         ft.Text("Este análisis requiere partidos pasados para calcular el promedio.", size=14, color="white70"),
                     ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
@@ -2522,71 +2728,98 @@ El Sistema.
         threading.Thread(target=_cargar, daemon=True).start()
 
     def _abrir_modal_mufa(self, e):
-        """Muestra el ranking de 'Mufa' (Quienes aciertan más derrotas)."""
-        try:
-            bd = BaseDeDatos()
-            datos = bd.obtener_ranking_mufa(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
-            
-            filas = []
-            for i, fila in enumerate(datos, start=1):
-                user = fila[0]
-                pred_derrotas = fila[1]
-                aciertos = fila[2]
-                porcentaje = fila[3]
-                
-                txt_porcentaje = f"{porcentaje:.1f}%".replace('.', ',')
-                
-                if porcentaje >= 50: color_txt = "red"
-                elif porcentaje >= 20: color_txt = "orange"
-                else: color_txt = "green" 
-                
-                filas.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.Text(f"{i}º", color="white", weight=ft.FontWeight.BOLD)),
-                    ft.DataCell(ft.Text(user, color="white")),
-                    ft.DataCell(ft.Container(content=ft.Text(str(pred_derrotas), color="cyan"), alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(str(aciertos), color="white"), alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(txt_porcentaje, color=color_txt, weight=ft.FontWeight.BOLD), alignment=ft.alignment.center)),
-                ]))
+        """Muestra el ranking de 'Mufa' con animación de carga."""
+        
+        # 1. Configuración inicial del modal (Estado Cargando)
+        self.loading_modal = ft.ProgressBar(width=200, color="amber", bgcolor="#222222")
+        
+        columna_content = ft.Column(
+            controls=[
+                ft.Text("Ranking Mufa 🌩️", size=18, weight="bold", color="white"),
+                ft.Text("Usuarios que más aciertan cuando pronostican que el Rojo pierde.", size=12, color="white70"),
+                ft.Container(height=10),
+                self.loading_modal,
+                ft.Container(height=50)
+            ],
+            height=150,
+            width=650,
+            scroll=None
+        )
+        
+        self.dlg_mufa = ft.AlertDialog(content=columna_content, modal=True)
+        self.page.open(self.dlg_mufa)
 
-            tabla = ft.DataTable(
-                columns=[
-                    ft.DataColumn(ft.Text("Pos")),
-                    ft.DataColumn(ft.Text("Usuario")),
-                    ft.DataColumn(ft.Text("Pred. Derrota", tooltip="Veces que pronosticó que perdíamos"), numeric=True),
-                    ft.DataColumn(ft.Text("Acertadas", tooltip="Veces que pronosticó derrota y PERDIMOS"), numeric=True),
-                    ft.DataColumn(ft.Text("% Mufa", tooltip="Porcentaje de derrotas acertadas"), numeric=True),
-                ],
-                rows=filas,
-                heading_row_color="black",
-                data_row_color={"hoverED": "#1A1A1A"},
-                border=ft.border.all(1, "white10"),
-                column_spacing=20,
-                # --- ALTURAS ESTANDARIZADAS ---
-                heading_row_height=60,
-                data_row_max_height=50,
-                data_row_min_height=50
-            )
-            
-            dlg = ft.AlertDialog(
-                title=ft.Text("Ranking Mufa 🌩️"),
-                content=ft.Column([
+        def _cargar():
+            time.sleep(0.3)
+            try:
+                bd = BaseDeDatos()
+                datos = bd.obtener_ranking_mufa(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
+                
+                filas = []
+                for i, fila in enumerate(datos, start=1):
+                    user = fila[0]
+                    pred_derrotas = fila[1]
+                    aciertos = fila[2]
+                    porcentaje = fila[3]
+                    
+                    txt_porcentaje = f"{porcentaje:.1f}%".replace('.', ',')
+                    
+                    if porcentaje >= 50: color_txt = "red"
+                    elif porcentaje >= 20: color_txt = "orange"
+                    else: color_txt = "green" 
+                    
+                    filas.append(ft.DataRow(cells=[
+                        ft.DataCell(ft.Container(content=ft.Text(f"{i}º", color="white", weight=ft.FontWeight.BOLD), width=50, alignment=ft.alignment.center)),
+                        ft.DataCell(ft.Container(content=ft.Text(user, color="white"), width=150, alignment=ft.alignment.center_left)),
+                        ft.DataCell(ft.Container(content=ft.Text(str(pred_derrotas), color="cyan"), width=100, alignment=ft.alignment.center)),
+                        ft.DataCell(ft.Container(content=ft.Text(str(aciertos), color="white"), width=100, alignment=ft.alignment.center)),
+                        ft.DataCell(ft.Container(content=ft.Text(txt_porcentaje, color=color_txt, weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center)),
+                    ]))
+
+                tabla = ft.DataTable(
+                    columns=[
+                        ft.DataColumn(ft.Container(content=ft.Text("Pos", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
+                        ft.DataColumn(ft.Container(content=ft.Text("Usuario", weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
+                        ft.DataColumn(ft.Container(content=ft.Text("Pred. Derrota", tooltip="Veces que pronosticó que perdíamos", weight="bold", color="white"), width=100, alignment=ft.alignment.center), numeric=True),
+                        ft.DataColumn(ft.Container(content=ft.Text("Acertadas", tooltip="Veces que pronosticó derrota y PERDIMOS", weight="bold", color="white"), width=100, alignment=ft.alignment.center), numeric=True),
+                        ft.DataColumn(ft.Container(content=ft.Text("% Mufa", tooltip="Porcentaje de derrotas acertadas", weight="bold", color="white"), width=100, alignment=ft.alignment.center), numeric=True),
+                    ],
+                    rows=filas,
+                    heading_row_color="black",
+                    data_row_color={"hoverED": "#1A1A1A"},
+                    border=ft.border.all(1, "white10"),
+                    column_spacing=10,
+                    heading_row_height=60,
+                    data_row_max_height=50,
+                    data_row_min_height=50
+                )
+                
+                # 3. Actualizar contenido del modal
+                columna_content.height = 400
+                columna_content.width = 650
+                
+                columna_content.controls = [
+                    ft.Text("Ranking Mufa 🌩️", size=18, weight="bold", color="white"),
                     ft.Text("Usuarios que más aciertan cuando pronostican que el Rojo pierde.", size=12, color="white70"),
+                    ft.Container(height=10),
                     ft.Container(
-                        # --- ALTURA VISIBLE: 270px (Header 60 + 4 filas de 50 + margen) ---
                         height=270,
                         content=ft.Column(
                             controls=[tabla],
                             scroll=ft.ScrollMode.AUTO 
                         )
-                    )
-                ], tight=True),
-                actions=[ft.TextButton("Cerrar", on_click=lambda e: self.page.close(dlg))]
-            )
-            self.page.open(dlg)
+                    ),
+                    ft.Container(height=10),
+                    ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_mufa))], alignment=ft.MainAxisAlignment.END)
+                ]
+                self.dlg_mufa.update()
 
-        except Exception as ex:
-            GestorMensajes.mostrar(self.page, "Error", f"No se pudo cargar mufa: {ex}", "error")
-            return   
+            except Exception as ex:
+                self.page.close(self.dlg_mufa)
+                GestorMensajes.mostrar(self.page, "Error", f"No se pudo cargar mufa: {ex}", "error")
+
+        # Ejecutar en hilo secundario
+        threading.Thread(target=_cargar, daemon=True).start()
 
     def _abrir_modal_cambios_pronostico(self, e):
         """
@@ -2649,7 +2882,7 @@ El Sistema.
                     ft.Text(titulo, size=18, weight="bold", color="white"),
                     ft.Container(height=20),
                     ft.Column([
-                        ft.Icon(ft.icons.WARNING_AMBER_ROUNDED, color="yellow", size=50),
+                        ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color="yellow", size=50),
                         ft.Text("No hay datos históricos", size=16, weight="bold", color="white"),
                         ft.Text("Se requieren partidos pasados para calcular estos promedios.", size=14, color="white70"),
                     ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
@@ -2734,7 +2967,7 @@ El Sistema.
             self.dlg_cambios.update()
 
         threading.Thread(target=_cargar, daemon=True).start()
-        
+
     def _seleccionar_rival_admin(self, id_rival):
         """Maneja el clic en la tabla de administración de equipos (Sin Recarga de BD)."""
         self.rival_seleccionado_id = id_rival
@@ -2907,8 +3140,9 @@ El Sistema.
             self._bloquear_botones_filtros(True) 
         if actualizar_pronosticos: 
             self.loading_pronosticos.visible = True
-            self.tabla_pronosticos.sort_column_index = self.pronosticos_sort_col_index
-            self.tabla_pronosticos.sort_ascending = self.pronosticos_sort_asc
+            self.tabla_pronosticos_header.sort_column_index = self.pronosticos_sort_col_index
+            self.tabla_pronosticos_header.sort_ascending = self.pronosticos_sort_asc
+            self.tabla_pronosticos.sort_column_index = None # Aseguramos que abajo no haya flecha
         if actualizar_admin: self.loading_admin.visible = True
         
         self.page.update()
@@ -2919,13 +3153,17 @@ El Sistema.
                 bd = BaseDeDatos()
                 
                 # ------------------------------------------
-                # 1. RANKING
+                # 1. RANKING (TABLA POSICIONES)
                 # ------------------------------------------
                 if actualizar_ranking:
                     datos_ranking = bd.obtener_ranking(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
                     filas_ranking = []
                     for i, fila in enumerate(datos_ranking, start=1):
                         user = fila[0]
+                        
+                        # --- MODIFICACIÓN: Emoji Trofeo para el 1º ---
+                        user_display = f"🏆 {user}" if i == 1 else user
+                        
                         total = fila[1]
                         promedio_intentos = fila[7]
                         efectividad = fila[8]
@@ -2968,7 +3206,7 @@ El Sistema.
                                 estilo_color = "red"
                         else:
                             txt_ant = "0 días 00:00:00.00 h"
-                            estilo_texto = "-" # O puedes poner "Sin datos"
+                            estilo_texto = "-" 
 
                         txt_intentos = f"{promedio_intentos:.2f}".replace('.', ',')
                         txt_efectividad = f"{efectividad:.2f} %".replace('.', ',')
@@ -2979,15 +3217,16 @@ El Sistema.
                         filas_ranking.append(ft.DataRow(
                             cells=[
                                 ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(user, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left, on_click=evento_click)),
+                                # Usamos user_display para mostrar el emoji, pero mantenemos user en los eventos
+                                ft.DataCell(ft.Container(content=ft.Text(user_display, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(str(total), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=100, alignment=ft.alignment.center, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white", weight=ft.FontWeight.BOLD), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(str(fila[5]), color="cyan", weight=ft.FontWeight.BOLD), width=120, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(str(fila[5]), color="cyan"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(txt_ant, color="cyan", size=12), width=200, alignment=ft.alignment.center, on_click=evento_click)),
                                 ft.DataCell(ft.Container(content=ft.Text(txt_intentos, color="cyan"), width=80, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center, on_click=evento_click)),
+                                ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green"), width=100, alignment=ft.alignment.center, on_click=evento_click)),
                             ],
                             color=color_fila,
                             data=user 
@@ -2995,7 +3234,7 @@ El Sistema.
                     self.tabla_estadisticas.rows = filas_ranking
 
                 # ------------------------------------------
-                # 2. COPAS
+                # 2. COPAS (TORNEOS GANADOS)
                 # ------------------------------------------
                 if actualizar_copas and self.filtro_ranking_edicion_id is None:
                     datos_copas = bd.obtener_torneos_ganados(self.filtro_ranking_anio)
@@ -3003,15 +3242,19 @@ El Sistema.
                     for i, fila in enumerate(datos_copas, start=1):
                         user = fila[0]
                         copas = fila[1]
+                        
+                        # --- MODIFICACIÓN: Emoji Trofeo para el 1º ---
+                        user_display = f"🏆 {user}" if i == 1 else user
+                        
                         filas_copas.append(ft.DataRow(cells=[
                             ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center)),
-                            ft.DataCell(ft.Container(content=ft.Text(user, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left)),
+                            ft.DataCell(ft.Container(content=ft.Text(user_display, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left)),
                             ft.DataCell(ft.Container(content=ft.Text(str(copas), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=120, alignment=ft.alignment.center)),
                         ]))
                     self.tabla_copas.rows = filas_copas
 
                 # ------------------------------------------
-                # 3. PARTIDOS (Modificado: Deshabilitar click en pasados)
+                # 3. PARTIDOS
                 # ------------------------------------------
                 if actualizar_partidos:
                     datos_partidos_user = bd.obtener_partidos(
@@ -3041,27 +3284,27 @@ El Sistema.
                         if puntos_usuario is None: texto_puntos = "-"
                         else: texto_puntos = f"{puntos_usuario}"
 
+                        # --- LOGICA ERROR ABSOLUTO TABLA PARTIDOS ---
                         if error_abs is None:
                             txt_error = "-"
                             color_error = "white70"
                         else:
-                            val_err = int(error_abs)
-                            txt_error = str(val_err)
+                            val_err = float(error_abs)
+                            txt_error = f"{val_err:.2f}".replace('.', ',')
+                            
                             if val_err == 0: color_error = "cyan"
-                            elif val_err <= 2: color_error = "green"
-                            elif val_err <= 4: color_error = "yellow"
+                            elif val_err <= 1.0: color_error = "green"
+                            elif val_err <= 2.0: color_error = "yellow"
                             else: color_error = "red"
 
-                        # Determinar si el partido ya se jugó (tiene goles cargados)
                         es_partido_jugado = (gc is not None)
 
-                        # Configurar click: SOLO si NO se ha jugado
                         if not es_partido_jugado:
                             evt_click = lambda e, id=p_id: self._seleccionar_partido_click(id)
                             color_fila = "#8B0000" if p_id == self.partido_a_pronosticar_id else None
                         else:
-                            evt_click = None # Anula el click y el cursor de mano
-                            color_fila = None # Nunca se selecciona si ya se jugó
+                            evt_click = None 
+                            color_fila = None 
 
                         filas_tabla_partidos.append(ft.DataRow(
                             cells=[
@@ -3109,13 +3352,19 @@ El Sistema.
                         
                         puntos_disp = str(pts) if pts is not None else "-"
                         
+                        # --- LOGICA ERROR ABSOLUTO TABLA PRONOSTICOS ---
                         if err_abs is not None:
-                            val_err = int(err_abs)
-                            err_disp = str(val_err)
-                            if val_err == 0: color_err = "cyan"
-                            elif val_err <= 2: color_err = "green"
-                            elif val_err <= 4: color_err = "yellow"
-                            else: color_err = "red"
+                            val_err = float(err_abs)
+                            err_disp = f"{val_err:.2f}".replace('.', ',')
+                            
+                            if val_err == 0: 
+                                color_err = "cyan"
+                            elif val_err <= 1.0: 
+                                color_err = "green"
+                            elif val_err <= 2.0: 
+                                color_err = "yellow"
+                            else: 
+                                color_err = "red"
                         else:
                             err_disp = "-"
                             color_err = "white70"
@@ -3126,15 +3375,15 @@ El Sistema.
 
                         filas_filtradas.append(ft.DataRow(
                             cells=[
-                                ft.DataCell(ft.Container(content=ft.Text(row[0], color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(row[0], color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left, on_click=evt_click_pron)), # Rival -> CON NEGRITA
                                 ft.DataCell(ft.Container(content=ft.Text(fecha_disp, color="white"), width=140, alignment=ft.alignment.center, on_click=evt_click_pron)),
                                 ft.DataCell(ft.Container(content=ft.Text(row[2], color="yellow"), width=150, alignment=ft.alignment.center_left, on_click=evt_click_pron)),
-                                ft.DataCell(ft.Container(content=ft.Text(res_txt, color="white", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)),
-                                ft.DataCell(ft.Container(content=ft.Text(row[5], color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left, on_click=evt_click_pron)),
-                                ft.DataCell(ft.Container(content=ft.Text(pron_txt, color="cyan", weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(res_txt, color="white"), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)), 
+                                ft.DataCell(ft.Container(content=ft.Text(row[5], color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left, on_click=evt_click_pron)), # Usuario -> CON NEGRITA
+                                ft.DataCell(ft.Container(content=ft.Text(pron_txt, color="cyan"), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)), 
                                 ft.DataCell(ft.Container(content=ft.Text(fecha_pred_disp, color="white70"), width=160, alignment=ft.alignment.center, on_click=evt_click_pron)), 
-                                ft.DataCell(ft.Container(content=ft.Text(puntos_disp, color="green", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center, on_click=evt_click_pron)),
-                                ft.DataCell(ft.Container(content=ft.Text(err_disp, color=color_err, weight=ft.FontWeight.BOLD), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)),
+                                ft.DataCell(ft.Container(content=ft.Text(puntos_disp, color="green"), width=60, alignment=ft.alignment.center, on_click=evt_click_pron)), 
+                                ft.DataCell(ft.Container(content=ft.Text(err_disp, color=color_err), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)), 
                             ],
                             color=color_fila_pron,
                             data=row_key 
@@ -3146,7 +3395,13 @@ El Sistema.
                         def key_sort(row):
                             try:
                                 val = row.cells[idx].content.content.value
-                                if idx in [7, 8]: return float(val) if val != "-" else -999
+                                # Índice 7 (Puntos) y 8 (Error Absoluto, última columna visible)
+                                if idx in [7, 8]: 
+                                    if val == "-": return -999
+                                    # IMPORTANTE: Reemplazar coma por punto para poder convertir a float y ordenar
+                                    val_clean = val.replace(',', '.')
+                                    return float(val_clean)
+                                
                                 if idx in [1, 6]:
                                     try:
                                         if ":" in val:
@@ -3455,7 +3710,7 @@ El Sistema.
             # Abrir modal (código original de carga del modal)
             self.lv_torneos = ft.ListView(expand=True, spacing=5, height=200)
             self.lv_anios = ft.ListView(expand=True, spacing=5, height=200)
-            self.btn_ver_torneo = ft.ElevatedButton("Ver", icon=ft.icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_torneo)
+            self.btn_ver_torneo = ft.ElevatedButton("Ver", icon=ft.Icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_torneo)
             
             def _cargar_datos_modal():
                 try:
@@ -3511,7 +3766,7 @@ El Sistema.
         else:
             # Abrir modal
             self.lv_equipos = ft.ListView(expand=True, spacing=5, height=300)
-            self.btn_ver_equipo = ft.ElevatedButton("Ver", icon=ft.icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_equipo)
+            self.btn_ver_equipo = ft.ElevatedButton("Ver", icon=ft.Icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_equipo)
             
             def _cargar_rivales_modal():
                 try:
@@ -3628,7 +3883,7 @@ El Sistema.
         self.temp_anio_graf = None
         self.chk_usuarios_grafico = [] 
         
-        self.btn_generar_grafico = ft.ElevatedButton("Generar Gráfico", icon=ft.icons.SHOW_CHART, disabled=True, on_click=self._generar_grafico_puestos)
+        self.btn_generar_grafico = ft.ElevatedButton("Generar Gráfico", icon=ft.Icons.SHOW_CHART, disabled=True, on_click=self._generar_grafico_puestos)
 
         def _cargar_datos():
             bd = BaseDeDatos()
@@ -3832,7 +4087,7 @@ El Sistema.
                     ft.Row(
                         controls=[
                             ft.Text(f"Evolución: {self.temp_camp_graf} {self.temp_anio_graf}", size=24, weight="bold"),
-                            ft.IconButton(icon=ft.icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_full))
+                            ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_full))
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                     ),
@@ -3873,7 +4128,7 @@ El Sistema.
         self.lv_torneos = ft.ListView(expand=True, spacing=5, height=200)
         self.lv_anios = ft.ListView(expand=True, spacing=5, height=200)
         
-        self.btn_ver_torneo = ft.ElevatedButton("Ver", icon=ft.icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_torneo_ranking)
+        self.btn_ver_torneo = ft.ElevatedButton("Ver", icon=ft.Icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_torneo_ranking)
         
         def _cargar_datos_modal():
             try:
@@ -3918,7 +4173,7 @@ El Sistema.
 
         # --- 2. SI NO ESTÁ ACTIVO, ABRIMOS EL MODAL ---
         self.lv_anios_ranking = ft.ListView(expand=True, spacing=5, height=300)
-        self.btn_ver_anio = ft.ElevatedButton("Ver", icon=ft.icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_anio_ranking)
+        self.btn_ver_anio = ft.ElevatedButton("Ver", icon=ft.Icons.VISIBILITY, disabled=True, on_click=self._confirmar_filtro_anio_ranking)
         
         def _cargar_anios():
             try:
@@ -4089,6 +4344,356 @@ El Sistema.
         self.page.bgcolor = "#121212" 
         self._construir_interfaz_login()
         self.page.update()
+    
+    # --- FUNCIONES GRÁFICO DE TORTA (ESTILO DE PRONÓSTICO) ---
+
+    def _abrir_selector_grafico_torta(self, e):
+        """Abre el modal para configurar el gráfico de torta con animación de carga inicial."""
+        
+        # 1. Crear y mostrar diálogo de carga
+        loading_content = ft.Column(
+            controls=[
+                ft.Text("Cargando filtros...", size=16, weight="bold", color="white"),
+                ft.Container(height=10),
+                ft.ProgressBar(width=200, color="amber", bgcolor="#222222"),
+                ft.Text("Obteniendo torneos y usuarios...", size=12, color="white70")
+            ],
+            height=100,
+            width=300,
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER
+        )
+        self.dlg_carga_filtros = ft.AlertDialog(content=loading_content, modal=True)
+        self.page.open(self.dlg_carga_filtros)
+
+        def _cargar_datos_torta():
+            # Pausa estética breve
+            time.sleep(0.5)
+            
+            # Inicializar listas
+            self.lv_torneos_torta = ft.ListView(expand=True, spacing=5, height=150)
+            self.lv_anios_torta = ft.ListView(expand=True, spacing=5, height=150)
+            self.lv_usuarios_torta = ft.ListView(expand=True, spacing=5, height=150)
+            
+            self.temp_camp_torta = None
+            self.temp_anio_torta = None
+            self.temp_usuario_torta = None 
+            
+            self.btn_generar_grafico_torta = ft.ElevatedButton(
+                "Generar Gráfico", 
+                icon=ft.Icons.PIE_CHART, 
+                disabled=True, 
+                on_click=self._generar_grafico_torta
+            )
+
+            bd = BaseDeDatos()
+            
+            # 1. Torneos
+            ediciones = bd.obtener_ediciones()
+            self.cache_ediciones_modal = ediciones
+            nombres_unicos = sorted(list(set(e[1] for e in ediciones)))
+            
+            controles_tor = []
+            for nombre in nombres_unicos:
+                controles_tor.append(ft.ListTile(title=ft.Text(nombre, size=14), data=nombre, on_click=self._sel_torneo_torta_modal, bgcolor="#2D2D2D"))
+            self.lv_torneos_torta.controls = controles_tor
+            
+            # 2. Años 
+            anios = bd.obtener_anios()
+            controles_anios = []
+            for id_a, num in anios:
+                controles_anios.append(ft.ListTile(title=ft.Text(str(num), size=14), data=num, on_click=self._sel_anio_torta_modal, bgcolor="#2D2D2D"))
+            self.lv_anios_torta.controls = controles_anios
+
+            # 3. Usuarios
+            usuarios = bd.obtener_usuarios()
+            controles_usu = []
+            for usu in usuarios:
+                controles_usu.append(
+                    ft.ListTile(
+                        title=ft.Text(usu, size=14),
+                        data=usu,
+                        on_click=self._sel_usuario_torta_modal,
+                        bgcolor="#2D2D2D"
+                    )
+                )
+            self.lv_usuarios_torta.controls = controles_usu
+            
+            # Construir estructura del modal final
+            col_tor = ft.Column(expand=1, controls=[ft.Text("1. Torneo (Opcional)", weight="bold", size=12), ft.Container(content=self.lv_torneos_torta, border=ft.border.all(1, "white24"), border_radius=5)])
+            col_anio = ft.Column(expand=1, controls=[ft.Text("2. Año (Opcional)", weight="bold", size=12), ft.Container(content=self.lv_anios_torta, border=ft.border.all(1, "white24"), border_radius=5)])
+            col_usu = ft.Column(expand=1, controls=[ft.Text("3. Usuario (Obligatorio)", weight="bold", size=12, color="cyan"), ft.Container(content=self.lv_usuarios_torta, border=ft.border.all(1, "white24"), border_radius=5)])
+
+            contenido = ft.Container(width=750, height=300, content=ft.Row(controls=[col_tor, col_anio, col_usu], spacing=20))
+
+            self.dlg_grafico_torta = ft.AlertDialog(
+                modal=True, 
+                title=ft.Text("Configurar Gráfico de Estilo"), 
+                content=contenido, 
+                actions=[
+                    ft.TextButton("Cancelar", on_click=lambda e: self.page.close(self.dlg_grafico_torta)), 
+                    self.btn_generar_grafico_torta
+                ]
+            )
+            
+            # Cerrar carga y abrir selector
+            self.page.close(self.dlg_carga_filtros)
+            self.page.open(self.dlg_grafico_torta)
+
+        threading.Thread(target=_cargar_datos_torta, daemon=True).start()
+
+    def _generar_grafico_torta(self, e):
+        """Genera el PieChart con animación de carga."""
+        
+        # 1. Crear y mostrar diálogo de carga
+        loading_content = ft.Column(
+            controls=[
+                ft.Text("Analizando pronósticos...", size=16, weight="bold", color="white"),
+                ft.Container(height=10),
+                ft.ProgressBar(width=200, color="amber", bgcolor="#222222"),
+                ft.Text("Calculando porcentajes...", size=12, color="white70")
+            ],
+            height=100,
+            width=300,
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER
+        )
+        self.dlg_carga_grafico = ft.AlertDialog(content=loading_content, modal=True)
+        self.page.open(self.dlg_carga_grafico)
+
+        # Determinar IDs para la consulta (Variables locales para el thread)
+        edicion_id = None
+        anio_filtro = None
+        
+        if self.temp_camp_torta and self.temp_anio_torta:
+            for ed in self.cache_ediciones_modal:
+                if ed[1] == self.temp_camp_torta and ed[2] == self.temp_anio_torta:
+                    edicion_id = ed[0]
+                    break
+        elif self.temp_anio_torta:
+            anio_filtro = self.temp_anio_torta
+
+        def _tarea():
+            # Pausa estética
+            time.sleep(0.8)
+            
+            bd = BaseDeDatos()
+            stats = bd.obtener_estadisticas_estilo_pronostico(self.temp_usuario_torta, edicion_id, anio_filtro)
+            
+            # Si no hay datos, cerramos carga y mostramos aviso
+            if not stats or stats[0] == 0:
+                self.page.close(self.dlg_carga_grafico)
+                GestorMensajes.mostrar(self.page, "Info", "No hay datos históricos para generar el gráfico.", "info")
+                return
+
+            total_partidos = stats[0]
+            sin_pron = stats[1]
+            victorias = stats[2]
+            empates = stats[3]
+            derrotas = stats[4]
+
+            # Calcular porcentajes
+            def calc_pct(val):
+                return (val / total_partidos) * 100 if total_partidos > 0 else 0
+
+            # Definición de Secciones
+            secciones = []
+            
+            # 1. Victorias (Verde)
+            if victorias > 0:
+                secciones.append(
+                    ft.PieChartSection(
+                        value=victorias,
+                        title=f"{calc_pct(victorias):.0f}%",
+                        color=ft.Colors.GREEN,
+                        radius=100,
+                        title_style=ft.TextStyle(size=14, weight=ft.FontWeight.BOLD, color="white")
+                    )
+                )
+            
+            # 2. Empates (Amarillo)
+            if empates > 0:
+                secciones.append(
+                    ft.PieChartSection(
+                        value=empates,
+                        title=f"{calc_pct(empates):.0f}%",
+                        color=ft.Colors.YELLOW,
+                        radius=100,
+                        title_style=ft.TextStyle(size=14, weight=ft.FontWeight.BOLD, color="black")
+                    )
+                )
+            
+            # 3. Derrotas (Rojo)
+            if derrotas > 0:
+                secciones.append(
+                    ft.PieChartSection(
+                        value=derrotas,
+                        title=f"{calc_pct(derrotas):.0f}%",
+                        color=ft.Colors.RED,
+                        radius=100,
+                        title_style=ft.TextStyle(size=14, weight=ft.FontWeight.BOLD, color="white")
+                    )
+                )
+                
+            # 4. Sin Pronóstico (Transparente con borde)
+            if sin_pron > 0:
+                secciones.append(
+                    ft.PieChartSection(
+                        value=sin_pron,
+                        title=f"{calc_pct(sin_pron):.0f}%",
+                        color=ft.Colors.TRANSPARENT,
+                        radius=98,
+                        border_side=ft.BorderSide(2, "white54"),
+                        title_style=ft.TextStyle(size=12, color="white70")
+                    )
+                )
+
+            chart = ft.PieChart(
+                sections=secciones,
+                sections_space=2,
+                center_space_radius=0, 
+                expand=True
+            )
+
+            # Leyenda personalizada
+            leyenda = ft.Column(
+                controls=[
+                    ft.Row([ft.Container(width=15, height=15, bgcolor=ft.Colors.GREEN, shape=ft.BoxShape.CIRCLE), ft.Text("Victorias", weight="bold")], spacing=5),
+                    ft.Row([ft.Container(width=15, height=15, bgcolor=ft.Colors.YELLOW, shape=ft.BoxShape.CIRCLE), ft.Text("Empates", weight="bold")], spacing=5),
+                    ft.Row([ft.Container(width=15, height=15, bgcolor=ft.Colors.RED, shape=ft.BoxShape.CIRCLE), ft.Text("Derrotas", weight="bold")], spacing=5),
+                    # Círculo hueco inventado para leyenda
+                    ft.Row([
+                        ft.Container(width=15, height=15, bgcolor=ft.Colors.TRANSPARENT, border=ft.border.all(2, "white"), shape=ft.BoxShape.CIRCLE), 
+                        ft.Text("Sin pronóstico", color="white70")
+                    ], spacing=5),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER
+            )
+
+            # Título del Gráfico
+            titulo_txt = f"Estilo: {self.temp_usuario_torta}"
+            subtitulo_txt = "Histórico completo"
+            if self.temp_camp_torta: subtitulo_txt = f"{self.temp_camp_torta} {self.temp_anio_torta}"
+            elif self.temp_anio_torta: subtitulo_txt = f"Año {self.temp_anio_torta}"
+
+            ancho = 600
+            alto = 500
+
+            contenido_final = ft.Container(
+                width=ancho, height=alto,
+                padding=20, bgcolor="#1E1E1E",
+                content=ft.Column([
+                    ft.Row(
+                        controls=[
+                            ft.Column([
+                                ft.Text(titulo_txt, size=22, weight="bold"),
+                                ft.Text(subtitulo_txt, size=14, color="white54")
+                            ]),
+                            ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_torta_full))
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                    ),
+                    ft.Divider(),
+                    ft.Row(
+                        controls=[
+                            ft.Container(content=chart, expand=True, height=300),
+                            ft.Container(content=leyenda, width=150)
+                        ],
+                        expand=True
+                    ),
+                    ft.Text(f"Total Partidos Jugados: {total_partidos}", size=12, italic=True, text_align=ft.TextAlign.CENTER)
+                ])
+            )
+            
+            # Cerrar carga, cerrar selector y abrir resultado
+            self.page.close(self.dlg_carga_grafico)
+            self.page.close(self.dlg_grafico_torta)
+            
+            self.dlg_grafico_torta_full = ft.AlertDialog(content=contenido_final, modal=True, inset_padding=10)
+            self.page.open(self.dlg_grafico_torta_full)
+
+        threading.Thread(target=_tarea, daemon=True).start()
+
+    def _sel_torneo_torta_modal(self, e):
+        """Selecciona o deselecciona torneo. Filtra los años."""
+        nombre = e.control.data
+        
+        # Toggle selection
+        if self.temp_camp_torta == nombre:
+            self.temp_camp_torta = None # Deseleccionar
+        else:
+            self.temp_camp_torta = nombre
+        
+        # Visual Update Torneos
+        for c in self.lv_torneos_torta.controls: 
+            c.bgcolor = "blue" if c.data == self.temp_camp_torta else "#2D2D2D"
+        self.lv_torneos_torta.update()
+        
+        # Actualizar lista de Años
+        if self.temp_camp_torta:
+            # Mostrar solo años de este torneo
+            anios_filtrados = sorted([ed[2] for ed in self.cache_ediciones_modal if ed[1] == self.temp_camp_torta], reverse=True)
+        else:
+            # Mostrar todos los años disponibles en BD si no hay torneo seleccionado
+            anios_filtrados = sorted(list(set(ed[2] for ed in self.cache_ediciones_modal)), reverse=True)
+
+        ctls = []
+        for a in anios_filtrados:
+            ctls.append(ft.ListTile(title=ft.Text(str(a), size=14), data=a, on_click=self._sel_anio_torta_modal, bgcolor="#2D2D2D"))
+        self.lv_anios_torta.controls = ctls
+        
+        # Si el año seleccionado ya no está en la lista filtrada, deseleccionarlo
+        if self.temp_anio_torta not in anios_filtrados:
+            self.temp_anio_torta = None
+        else:
+            # Mantener visualmente seleccionado si aun existe
+            for c in self.lv_anios_torta.controls:
+                if c.data == self.temp_anio_torta: c.bgcolor = "blue"
+
+        self.lv_anios_torta.update()
+        self._validar_btn_grafico_torta()
+
+    def _sel_anio_torta_modal(self, e):
+        """Selecciona o deselecciona año."""
+        anio = e.control.data
+        if self.temp_anio_torta == anio:
+            self.temp_anio_torta = None
+        else:
+            self.temp_anio_torta = anio
+            
+        for c in self.lv_anios_torta.controls: 
+            c.bgcolor = "blue" if c.data == self.temp_anio_torta else "#2D2D2D"
+        self.lv_anios_torta.update()
+        self._validar_btn_grafico_torta()
+
+    def _sel_usuario_torta_modal(self, e):
+        """Selecciona usuario (obligatorio)."""
+        usuario = e.control.data
+        self.temp_usuario_torta = usuario
+        
+        for c in self.lv_usuarios_torta.controls: 
+            c.bgcolor = "blue" if c.data == self.temp_usuario_torta else "#2D2D2D"
+        self.lv_usuarios_torta.update()
+        self._validar_btn_grafico_torta()
+
+    def _validar_btn_grafico_torta(self):
+        """
+        Reglas:
+        1. Usuario obligatorio.
+        2. Si hay Torneo seleccionado, Año es obligatorio.
+        """
+        usuario_ok = self.temp_usuario_torta is not None
+        
+        logica_torneo_anio = True
+        if self.temp_camp_torta is not None:
+            # Si hay torneo, DEBE haber año
+            if self.temp_anio_torta is None:
+                logica_torneo_anio = False
+        
+        habilitar = usuario_ok and logica_torneo_anio
+        
+        self.btn_generar_grafico_torta.disabled = not habilitar
+        self.btn_generar_grafico_torta.update()
 
 if __name__ == "__main__":
     def main(page: ft.Page):

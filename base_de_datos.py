@@ -1160,8 +1160,8 @@ class BaseDeDatos:
 
     def obtener_todos_pronosticos(self):
         """
-        Obtiene el listado de TODOS los pronósticos (historial completo).
-        Incluye cálculo de Error Absoluto en el índice 10.
+        Obtiene el listado de TODOS los pronósticos.
+        Muestra Puntos y Error Absoluto SOLO si es el último pronóstico del usuario para ese partido.
         """
         conexion = None
         cursor = None
@@ -1179,20 +1179,29 @@ class BaseDeDatos:
                 u.username,
                 pr.pred_goles_independiente,
                 pr.pred_goles_rival,
+                
                 -- CÁLCULO DE PUNTOS
                 CASE 
                     WHEN p.goles_independiente IS NULL THEN NULL
+                    -- Si la fecha de ESTE pronóstico es anterior a la última registrada -> NULL
+                    WHEN pr.fecha_prediccion < latest.max_fecha THEN NULL
                     ELSE
                         (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
                         (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END)
                 END as puntos,
+                
                 pr.fecha_prediccion,
                 
-                -- [NUEVO CAMPO: Índice 10] ERROR ABSOLUTO
-                -- Formula: |Real_CAI - Pred_CAI| + |Real_Rival - Pred_Rival|
-                ABS(CAST(p.goles_independiente AS SIGNED) - CAST(pr.pred_goles_independiente AS SIGNED)) + 
-                ABS(CAST(p.goles_rival AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) as error_absoluto
+                -- ERROR ABSOLUTO
+                CASE 
+                    WHEN p.goles_independiente IS NULL OR pr.pred_goles_independiente IS NULL THEN NULL
+                    -- Si es un pronóstico antiguo -> NULL
+                    WHEN pr.fecha_prediccion < latest.max_fecha THEN NULL
+                    ELSE
+                        ABS(CAST(p.goles_independiente AS SIGNED) - CAST(pr.pred_goles_independiente AS SIGNED)) + 
+                        ABS(CAST(p.goles_rival AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED))
+                END as error_absoluto
 
             FROM pronosticos pr  
             JOIN partidos p ON pr.partido_id = p.id
@@ -1201,6 +1210,14 @@ class BaseDeDatos:
             JOIN ediciones e ON p.edicion_id = e.id
             JOIN campeonatos c ON e.campeonato_id = c.id
             JOIN anios a ON e.anio_id = a.id
+            
+            -- JOIN para identificar cuál es la fecha del ÚLTIMO pronóstico para cada usuario/partido
+            INNER JOIN (
+                SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                FROM pronosticos
+                GROUP BY usuario_id, partido_id
+            ) latest ON pr.usuario_id = latest.usuario_id AND pr.partido_id = latest.partido_id
+            
             ORDER BY p.fecha_hora DESC, pr.fecha_prediccion DESC
             """
             
@@ -1213,6 +1230,184 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
 
+    def obtener_estadisticas_estilo_pronostico(self, usuario, edicion_id=None, anio=None):
+        """
+        Obtiene estadísticas para el gráfico de torta de 'Estilo de Pronóstico'.
+        Considera partidos PASADOS para determinar si hubo pronóstico o no.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            params = [usuario, usuario] # Para las subconsultas de pronósticos
+            filtro_sql = ""
+
+            # Filtros dinámicos
+            if edicion_id is not None:
+                filtro_sql += " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql += " AND a.numero = %s "
+                params.append(anio)
+
+            sql = f"""
+            SELECT 
+                -- Total partidos jugados en el periodo
+                COUNT(p.id) as total_partidos,
+                
+                -- Cantidad sin pronóstico (partidos pasados donde no hay predicción)
+                SUM(CASE WHEN pr.pred_goles_independiente IS NULL THEN 1 ELSE 0 END) as sin_pronostico,
+                
+                -- Cantidad Victorias pronosticadas
+                SUM(CASE WHEN pr.pred_goles_independiente > pr.pred_goles_rival THEN 1 ELSE 0 END) as pred_victoria,
+                
+                -- Cantidad Empates pronosticados
+                SUM(CASE WHEN pr.pred_goles_independiente = pr.pred_goles_rival THEN 1 ELSE 0 END) as pred_empate,
+                
+                -- Cantidad Derrotas pronosticadas
+                SUM(CASE WHEN pr.pred_goles_independiente < pr.pred_goles_rival THEN 1 ELSE 0 END) as pred_derrota
+
+            FROM partidos p
+            JOIN ediciones e ON p.edicion_id = e.id
+            JOIN anios a ON e.anio_id = a.id
+            
+            -- Left Join para ver si el usuario pronosticó (solo el último pronóstico)
+            LEFT JOIN (
+                SELECT p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
+                FROM pronosticos p1
+                INNER JOIN (
+                    SELECT partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    WHERE usuario_id = (SELECT id FROM usuarios WHERE username = %s)
+                    GROUP BY partido_id
+                ) p2 ON p1.partido_id = p2.partido_id AND p1.fecha_prediccion = p2.max_fecha
+                WHERE p1.usuario_id = (SELECT id FROM usuarios WHERE username = %s)
+            ) pr ON p.id = pr.partido_id
+            
+            WHERE 
+                p.goles_independiente IS NOT NULL -- Solo partidos que ya se jugaron (historia)
+                {filtro_sql}
+            """
+            
+            cursor.execute(sql, tuple(params))
+            return cursor.fetchone()
+
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas estilo pronóstico: {e}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+    
+    def obtener_estadisticas_tendencia_pronostico(self, usuario, edicion_id=None, anio=None):
+        """
+        Calcula la cantidad de partidos en cada categoría de tendencia (Optimismo/Pesimismo)
+        para un usuario, basado en la diferencia de goles pronosticada vs real.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            params = [usuario, usuario]
+            filtro_sql = ""
+
+            if edicion_id is not None:
+                filtro_sql += " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql += " AND a.numero = %s "
+                params.append(anio)
+
+            # Fórmula del índice: (Pred_CAI - Pred_Rival) - (Real_CAI - Real_Rival)
+            # >= 1.5: Muy Optimista
+            # 0.5 a 1.5: Optimista
+            # -0.5 a 0.5: Realista
+            # -1.5 a -0.5: Pesimista
+            # <= -1.5: Muy Pesimista
+            
+            sql = f"""
+            SELECT 
+                COUNT(p.id) as total_partidos,
+                
+                -- 1. Sin Pronóstico
+                SUM(CASE WHEN pr.pred_goles_independiente IS NULL THEN 1 ELSE 0 END) as sin_pronostico,
+                
+                -- 2. Muy Optimista (>= 1.5)
+                SUM(CASE 
+                    WHEN pr.pred_goles_independiente IS NOT NULL AND 
+                         ((CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) - 
+                          (CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED))) >= 1.5 
+                    THEN 1 ELSE 0 END) as muy_optimista,
+                    
+                -- 3. Optimista (0.5 <= x < 1.5)
+                SUM(CASE 
+                    WHEN pr.pred_goles_independiente IS NOT NULL AND 
+                         ((CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) - 
+                          (CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED))) >= 0.5 AND
+                         ((CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) - 
+                          (CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED))) < 1.5
+                    THEN 1 ELSE 0 END) as optimista,
+                    
+                -- 4. Realista (-0.5 < x < 0.5)
+                SUM(CASE 
+                    WHEN pr.pred_goles_independiente IS NOT NULL AND 
+                         ((CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) - 
+                          (CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED))) > -0.5 AND
+                         ((CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) - 
+                          (CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED))) < 0.5
+                    THEN 1 ELSE 0 END) as realista,
+                    
+                -- 5. Pesimista (-1.5 < x <= -0.5)
+                SUM(CASE 
+                    WHEN pr.pred_goles_independiente IS NOT NULL AND 
+                         ((CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) - 
+                          (CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED))) > -1.5 AND
+                         ((CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) - 
+                          (CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED))) <= -0.5
+                    THEN 1 ELSE 0 END) as pesimista,
+
+                -- 6. Muy Pesimista (<= -1.5)
+                SUM(CASE 
+                    WHEN pr.pred_goles_independiente IS NOT NULL AND 
+                         ((CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) - 
+                          (CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED))) <= -1.5 
+                    THEN 1 ELSE 0 END) as muy_pesimista
+
+            FROM partidos p
+            JOIN ediciones e ON p.edicion_id = e.id
+            JOIN anios a ON e.anio_id = a.id
+            
+            LEFT JOIN (
+                SELECT p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
+                FROM pronosticos p1
+                INNER JOIN (
+                    SELECT partido_id, MAX(fecha_prediccion) as max_fecha
+                    FROM pronosticos
+                    WHERE usuario_id = (SELECT id FROM usuarios WHERE username = %s)
+                    GROUP BY partido_id
+                ) p2 ON p1.partido_id = p2.partido_id AND p1.fecha_prediccion = p2.max_fecha
+                WHERE p1.usuario_id = (SELECT id FROM usuarios WHERE username = %s)
+            ) pr ON p.id = pr.partido_id
+            
+            WHERE 
+                p.goles_independiente IS NOT NULL
+                {filtro_sql}
+            """
+            
+            cursor.execute(sql, tuple(params))
+            return cursor.fetchone()
+
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas tendencia: {e}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+            
     def obtener_ediciones(self):
         """
         Obtiene las ediciones de torneos (ID, Nombre, Año, Finalizado).
