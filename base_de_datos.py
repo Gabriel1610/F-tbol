@@ -1407,7 +1407,150 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
+    
+    def obtener_ranking_mayores_errores(self, usuario=None, edicion_id=None, anio=None):
+        """
+        Obtiene el listado de los pronósticos con mayor error absoluto.
+        Si 'usuario' es None, busca entre TODOS los usuarios.
+        Ordenado descendentemente por error.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            params = []
+            filtro_sql = ""
+
+            # Filtros Opcionales
+            if usuario:
+                filtro_sql += " AND u.username = %s "
+                params.append(usuario)
             
+            if edicion_id is not None:
+                filtro_sql += " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql += " AND a.numero = %s "
+                params.append(anio)
+
+            sql = f"""
+            SELECT 
+                u.username,
+                r.nombre,
+                p.fecha_hora,
+                pr.fecha_prediccion,
+                pr.pred_goles_independiente,
+                pr.pred_goles_rival,
+                p.goles_independiente,
+                p.goles_rival,
+                -- Cálculo del Error Absoluto
+                (ABS(CAST(p.goles_independiente AS SIGNED) - CAST(pr.pred_goles_independiente AS SIGNED)) + 
+                 ABS(CAST(p.goles_rival AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED))) as error_absoluto
+
+            FROM pronosticos pr
+            JOIN partidos p ON pr.partido_id = p.id
+            JOIN usuarios u ON pr.usuario_id = u.id
+            JOIN rivales r ON p.rival_id = r.id
+            JOIN ediciones e ON p.edicion_id = e.id
+            JOIN anios a ON e.anio_id = a.id
+            
+            -- Solo tomamos el último pronóstico válido de cada usuario por partido
+            INNER JOIN (
+                SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
+                FROM pronosticos
+                GROUP BY usuario_id, partido_id
+            ) latest ON pr.usuario_id = latest.usuario_id AND pr.partido_id = latest.partido_id AND pr.fecha_prediccion = latest.max_fecha
+
+            WHERE 
+                p.goles_independiente IS NOT NULL
+                {filtro_sql}
+            
+            ORDER BY error_absoluto DESC, p.fecha_hora DESC
+            LIMIT 100
+            """
+            
+            cursor.execute(sql, tuple(params))
+            return cursor.fetchall()
+
+        except Exception as e:
+            logger.error(f"Error obteniendo mayores errores: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close() 
+
+    def obtener_estadisticas_firmeza_pronostico(self, usuario, edicion_id=None, anio=None):
+        """
+        Calcula estadísticas sobre la cantidad de veces que el usuario cambió su pronóstico
+        para partidos del PASADO.
+        Categorías:
+        - 1 intento: Firme
+        - 2 intentos: Dudoso
+        - 3+ intentos: Cambiante
+        - 0 intentos (o NULL): No participativo
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+
+            # --- CORRECCIÓN AQUÍ: Solo un usuario en la lista ---
+            params = [usuario] 
+            filtro_sql = ""
+
+            if edicion_id is not None:
+                filtro_sql += " AND p.edicion_id = %s "
+                params.append(edicion_id)
+            elif anio is not None:
+                filtro_sql += " AND a.numero = %s "
+                params.append(anio)
+
+            sql = f"""
+            SELECT 
+                COUNT(p.id) as total_partidos,
+                
+                -- 0. Sin Pronóstico (No participativo)
+                SUM(CASE WHEN stats.cant_intentos IS NULL OR stats.cant_intentos = 0 THEN 1 ELSE 0 END) as sin_pronostico,
+                
+                -- 1. Firme (Exactamente 1 intento)
+                SUM(CASE WHEN stats.cant_intentos = 1 THEN 1 ELSE 0 END) as firme,
+                
+                -- 2. Dudoso (Exactamente 2 intentos)
+                SUM(CASE WHEN stats.cant_intentos = 2 THEN 1 ELSE 0 END) as dudoso,
+                
+                -- 3. Cambiante (3 o más intentos)
+                SUM(CASE WHEN stats.cant_intentos >= 3 THEN 1 ELSE 0 END) as cambiante
+
+            FROM partidos p
+            JOIN ediciones e ON p.edicion_id = e.id
+            JOIN anios a ON e.anio_id = a.id
+            
+            -- Subconsulta: Contar cuántos registros tiene el usuario por partido
+            LEFT JOIN (
+                SELECT partido_id, COUNT(*) as cant_intentos
+                FROM pronosticos
+                WHERE usuario_id = (SELECT id FROM usuarios WHERE username = %s)
+                GROUP BY partido_id
+            ) stats ON p.id = stats.partido_id
+            
+            WHERE 
+                p.goles_independiente IS NOT NULL -- Solo partidos jugados (historial)
+                {filtro_sql}
+            """
+            
+            cursor.execute(sql, tuple(params))
+            return cursor.fetchone()
+
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas firmeza: {e}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
     def obtener_ediciones(self):
         """
         Obtiene las ediciones de torneos (ID, Nombre, Año, Finalizado).
