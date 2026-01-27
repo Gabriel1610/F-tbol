@@ -1408,11 +1408,34 @@ class BaseDeDatos:
             if cursor: cursor.close()
             if conexion: conexion.close()
     
+    def obtener_administradores(self):
+        """
+        Devuelve una lista con los usernames de los usuarios con tipo 'administrador'.
+        """
+        conexion = None
+        cursor = None
+        try:
+            conexion = self.abrir()
+            cursor = conexion.cursor()
+            
+            sql = "SELECT username FROM usuarios WHERE tipo = 'administrador'"
+            cursor.execute(sql)
+            
+            # fetchall devuelve una lista de tuplas [(user1,), (user2,)]
+            # Usamos comprensión de listas para sacar el string limpio
+            return [fila[0] for fila in cursor.fetchall()]
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo administradores: {e}")
+            return []
+        finally:
+            if cursor: cursor.close()
+            if conexion: conexion.close()
+
     def obtener_ranking_mayores_errores(self, usuario=None, edicion_id=None, anio=None):
         """
         Obtiene el listado de los pronósticos con mayor error absoluto.
-        Si 'usuario' es None, busca entre TODOS los usuarios.
-        Ordenado descendentemente por error.
+        Trae un límite ampliado (50) para procesar el Top 10 con empates en la aplicación.
         """
         conexion = None
         cursor = None
@@ -1456,7 +1479,6 @@ class BaseDeDatos:
             JOIN ediciones e ON p.edicion_id = e.id
             JOIN anios a ON e.anio_id = a.id
             
-            -- Solo tomamos el último pronóstico válido de cada usuario por partido
             INNER JOIN (
                 SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
                 FROM pronosticos
@@ -1468,8 +1490,9 @@ class BaseDeDatos:
                 {filtro_sql}
             
             ORDER BY error_absoluto DESC, p.fecha_hora DESC
-            LIMIT 100
+            LIMIT 50 
             """
+            # LIMIT 50: Traemos suficientes para calcular el Top 10 + empates en Python
             
             cursor.execute(sql, tuple(params))
             return cursor.fetchall()
@@ -1479,8 +1502,8 @@ class BaseDeDatos:
             return []
         finally:
             if cursor: cursor.close()
-            if conexion: conexion.close() 
-
+            if conexion: conexion.close()
+            
     def obtener_estadisticas_firmeza_pronostico(self, usuario, edicion_id=None, anio=None):
         """
         Calcula estadísticas sobre la cantidad de veces que el usuario cambió su pronóstico

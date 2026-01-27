@@ -23,11 +23,19 @@ CANT_PARTIDOS_A_SINCRONIZAR = 5
 REMITENTE = "gabrielydeindependiente@gmail.com"
 PASSWORD = "vjpz rjcz nkgq zqaq"
 DÍAS_NOTIFICACIÓN = 3  # Días antes del partido para notificar
+ADMINISTRADOR = 'Gabriel'
 
 class SistemaIndependiente:
     def __init__(self, page: ft.Page):
         self.page = page
         self._configurar_ventana()
+
+        try:
+            bd = BaseDeDatos()
+            self.lista_administradores = bd.obtener_administradores()
+        except:
+            self.lista_administradores = []
+
         self._construir_interfaz_login()
         threading.Thread(target=self._servicio_notificaciones_background, daemon=True).start()
 
@@ -36,7 +44,6 @@ class SistemaIndependiente:
         Revisa si hay usuarios sin pronosticar partidos próximos y les envía un correo.
         Se ejecuta una sola vez al iniciar la app.
         """
-        # Esperamos unos segundos para no ralentizar el inicio visual de la app
         time.sleep(5) 
         
         try:
@@ -48,7 +55,6 @@ class SistemaIndependiente:
                 print("   -> No hay notificaciones para enviar hoy.")
                 return
 
-            # Agrupar datos por usuario: {id_usuario: {'email': x, 'user': x, 'partidos': []}}
             usuarios_a_notificar = {}
             
             for fila in pendientes:
@@ -61,11 +67,9 @@ class SistemaIndependiente:
                         'partidos': []
                     }
                 
-                # Formato legible de fecha
                 fecha_str = fecha.strftime('%d/%m %H:%M')
                 usuarios_a_notificar[uid]['partidos'].append(f"{rival} ({fecha_str})")
 
-            # Enviar correos
             cantidad_enviados = 0
             
             for uid, datos in usuarios_a_notificar.items():
@@ -86,7 +90,6 @@ Ingresa a la aplicación para dejar tu resultado.
 Saludos,
 El Sistema.
                         """
-                # Envío SMTP
                 try:
                     msg = MIMEMultipart()
                     msg['From'] = REMITENTE
@@ -100,19 +103,37 @@ El Sistema.
                     server.send_message(msg)
                     server.quit()
                     
-                    # Si se envió bien, actualizamos la BD para no molestar más hoy
                     bd.marcar_usuario_notificado(uid)
                     cantidad_enviados += 1
-                    print(f"   -> Correo enviado a {username}")
                     
                 except Exception as e_mail:
-                    print(f"   [!] Error enviando a {username}: {e_mail}")
+                    mensaje_log = f"Error enviando a {username}: {e_mail}"
+                    print(f"   [!] {mensaje_log}")
+                    
+                    # --- LLAMADA A LA NUEVA FUNCIÓN (Error SMTP) ---
+                    self._mostrar_mensaje_admin("Error SMTP", mensaje_log, "error")
 
             if cantidad_enviados > 0:
                 print(f"🔔 Se enviaron {cantidad_enviados} notificaciones exitosamente.")
 
         except Exception as e:
-            print(f"Error en servicio de notificaciones: {e}")
+            mensaje_log = f"Error en servicio de notificaciones: {e}"
+            print(mensaje_log)
+            
+            # --- LLAMADA A LA NUEVA FUNCIÓN (Error General) ---
+            self._mostrar_mensaje_admin("Error de Sistema", mensaje_log, "error")
+
+    def _mostrar_mensaje_admin(self, titulo, mensaje, tipo="error"):
+        """
+        Función auxiliar que verifica si el usuario es admin y muestra
+        una ventana de mensaje. Si no es admin, no hace nada visual.
+        """
+        # Verificamos si existe usuario logueado y si está en la lista de admins
+        if hasattr(self, 'usuario_actual') and self.usuario_actual in self.lista_administradores:
+            # Usamos GestorMensajes para mostrar el error en pantalla
+            GestorMensajes.mostrar(self.page, titulo, mensaje, tipo)
+            # Como puede ser llamado desde un hilo secundario, forzamos update
+            self.page.update()
 
     def _sincronizar_fixture_api(self):
         """
@@ -241,7 +262,8 @@ El Sistema.
             print("Sincronización completada.")
             
         except Exception as e:
-            print(f"Error crítico sincronizando FotMob: {e}")
+            # --- CAMBIO AQUÍ: Llamada a la función de error admin ---
+            self._mostrar_mensaje_admin("Error Sincronización", f"Error crítico sincronizando FotMob: {e}", "error")
         
         finally:
             if hasattr(self, 'dlg_cargando_inicio') and self.dlg_cargando_inicio.open:
@@ -252,10 +274,10 @@ El Sistema.
                 actualizar_partidos=True, 
                 actualizar_pronosticos=True, 
                 actualizar_ranking=True,
-                actualizar_copas=True, # Recargar copas por si alguno finalizó recién
+                actualizar_copas=True, 
                 actualizar_admin=True 
             )
-
+            
     def _configurar_ventana(self):
         self.page.title = "Sistema Club Atlético Independiente"
         
@@ -1742,6 +1764,7 @@ El Sistema.
 
         except Exception as e:
             print(f"Error procesando item individual: {e}")
+            self._mostrar_mensaje_admin("Error procesando item individual", f"{e}", "error")
             return None
 
     def _ordenar_tabla_pronosticos(self, e):
@@ -2204,19 +2227,15 @@ El Sistema.
                 val = float(row[1])
                 
                 txt_val = f"{val:.2f}".replace('.', ',')
-                
+                color_val = self._obtener_color_error(val)
                 if val == 0:
                     clasificacion = "🎯 Predictor perfecto"
-                    color_val = "cyan"
                 elif val <= 1.0:
                     clasificacion = "👌 Muy preciso"
-                    color_val = "green"
                 elif val <= 2.0:
                     clasificacion = "👍 Aceptable"
-                    color_val = "yellow"
                 else: 
                     clasificacion = "🎲 Poco realista / arriesgado"
-                    color_val = "red"
 
                 filas.append(ft.DataRow(cells=[
                     ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight="bold", color="white"), width=50, alignment=ft.alignment.center)),
@@ -2424,7 +2443,7 @@ El Sistema.
                 self.lv_usuarios.controls = controles
                 self.lv_usuarios.update()
             except Exception as ex:
-                print(f"Error cargando modal usuarios: {ex}")
+                self._mostrar_mensaje_admin("Error cargando modal usuarios", f"{e}", "error")
 
         contenido_modal = ft.Container(width=400, height=400, content=ft.Column(controls=[ft.Text("Seleccione un Usuario", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_usuarios, border=ft.border.all(1, "white24"), border_radius=5, padding=5, expand=True)]))
 
@@ -2478,7 +2497,7 @@ El Sistema.
                 self.lv_torneos.controls = controles
                 self.lv_torneos.update()
             except Exception as ex:
-                print(f"Error cargando modal: {ex}")
+                self._mostrar_mensaje_admin("Error cargando modal", f"{ex}", "error")
 
         contenido_modal = ft.Container(width=500, height=300, content=ft.Row(controls=[ft.Column(expand=1, controls=[ft.Text("Torneo", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_torneos, border=ft.border.all(1, "white24"), border_radius=5, padding=5)]), ft.VerticalDivider(width=20, color="white24"), ft.Column(expand=1, controls=[ft.Text("Año", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_anios, border=ft.border.all(1, "white24"), border_radius=5, padding=5)])]))
 
@@ -2522,7 +2541,7 @@ El Sistema.
                 self.lv_equipos.controls = controles
                 self.lv_equipos.update()
             except Exception as ex:
-                print(f"Error cargando modal equipos: {ex}")
+                self._mostrar_mensaje_admin("Error cargando modal equipos", f"{ex}", "error")
 
         contenido_modal = ft.Container(width=400, height=400, content=ft.Column(controls=[ft.Text("Seleccione un Equipo", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_equipos, border=ft.border.all(1, "white24"), border_radius=5, padding=5, expand=True)]))
 
@@ -3056,6 +3075,7 @@ El Sistema.
                     self.input_admin_otro.update()
                 except Exception as e:
                     print(f"Error leyendo datos de la fila: {e}")
+                    self._mostrar_mensaje_admin("No se pudieron cargar los datos del equipo seleccionado.", f"Error leyendo datos de la fila: {e}", "error")
                 
                 encontrado = True
             else:
@@ -3358,10 +3378,7 @@ El Sistema.
                             val_err = float(error_abs)
                             txt_error = f"{val_err:.2f}".replace('.', ',')
                             
-                            if val_err == 0: color_error = "cyan"
-                            elif val_err <= 1.0: color_error = "green"
-                            elif val_err <= 2.0: color_error = "yellow"
-                            else: color_error = "red"
+                            color_error = self._obtener_color_error(val_err)
 
                         es_partido_jugado = (gc is not None)
 
@@ -3506,7 +3523,7 @@ El Sistema.
                     self.tabla_rivales.rows = filas_admin
 
             except Exception as e:
-                print(f"Error recargando datos: {e}")
+                self._mostrar_mensaje_general("Error recargando datos", f"No se pudieron recargar los datos: {e}", "error")
             
             finally:
                 self.loading.visible = False
@@ -3791,7 +3808,7 @@ El Sistema.
                     self.lv_torneos.controls = controles
                     self.lv_torneos.update()
                 except Exception as ex:
-                    print(f"Error cargando modal: {ex}")
+                    self._mostrar_mensaje_general("Error cargando modal", f"No se pudieron cargar los torneos: {ex}", "error")
 
             contenido_modal = ft.Container(width=500, height=300, content=ft.Row(controls=[ft.Column(expand=1, controls=[ft.Text("Torneo", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_torneos, border=ft.border.all(1, "white24"), border_radius=5, padding=5)]), ft.VerticalDivider(width=20, color="white24"), ft.Column(expand=1, controls=[ft.Text("Año", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_anios, border=ft.border.all(1, "white24"), border_radius=5, padding=5)])]))
             self.dlg_modal = ft.AlertDialog(modal=True, title=ft.Text("Filtrar Partidos por Torneo"), content=contenido_modal, actions=[ft.TextButton("Cancelar", on_click=lambda e: self.page.close(self.dlg_modal)), self.btn_ver_torneo], actions_alignment=ft.MainAxisAlignment.END)
@@ -3845,7 +3862,7 @@ El Sistema.
                     self.lv_equipos.controls = controles
                     self.lv_equipos.update()
                 except Exception as ex:
-                    print(f"Error cargando modal equipos: {ex}")
+                    self._mostrar_mensaje_general("Error cargando modal", f"No se pudieron cargar los equipos: {ex}", "error")
 
             contenido_modal = ft.Container(width=400, height=400, content=ft.Column(controls=[ft.Text("Seleccione un Equipo", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_equipos, border=ft.border.all(1, "white24"), border_radius=5, padding=5, expand=True)]))
             self.dlg_modal_equipo = ft.AlertDialog(modal=True, title=ft.Text("Filtrar por Equipo"), content=contenido_modal, actions=[ft.TextButton("Cancelar", on_click=lambda e: self.page.close(self.dlg_modal_equipo)), self.btn_ver_equipo], actions_alignment=ft.MainAxisAlignment.END)
@@ -4210,6 +4227,7 @@ El Sistema.
                 self.lv_torneos.update()
             except Exception as ex:
                 print(f"Error cargando modal: {ex}")
+                self._mostrar_mensaje_general("Error cargando modal", f"No se pudieron cargar los torneos: {ex}", "error")
 
         contenido_modal = ft.Container(width=500, height=300, content=ft.Row(controls=[ft.Column(expand=1, controls=[ft.Text("Torneo", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_torneos, border=ft.border.all(1, "white24"), border_radius=5, padding=5)]), ft.VerticalDivider(width=20, color="white24"), ft.Column(expand=1, controls=[ft.Text("Año", weight=ft.FontWeight.BOLD), ft.Container(content=self.lv_anios, border=ft.border.all(1, "white24"), border_radius=5, padding=5)])]))
 
@@ -4260,6 +4278,7 @@ El Sistema.
                 self.lv_anios_ranking.update()
             except Exception as ex:
                 print(f"Error cargando modal años: {ex}")
+                self._mostrar_mensaje_general("Error cargando modal", f"No se pudieron cargar los años: {ex}", "error")
 
         contenido_modal = ft.Container(
             width=300,
@@ -5343,112 +5362,175 @@ El Sistema.
         for c in self.lv_anios_err.controls: c.bgcolor = "blue" if c.data == self.temp_anio_err else "#2D2D2D"
         self.lv_anios_err.update()
 
-    def _generar_tabla_mayores_errores(self, e):
-        """Genera y muestra la tabla con los mayores errores DE TODOS LOS USUARIOS."""
+    def _obtener_color_error(self, valor_error):
+        """
+        Devuelve el color según el error absoluto:
+        0 = Cyan
+        <= 1 = Green
+        <= 2 = Yellow
+        > 2 = Red
+        """
+        if valor_error is None:
+            return "white"
+            
+        try:
+            val = float(valor_error) # Convertimos a float para manejar decimales si los hubiera
+            if val == 0:
+                return "cyan"
+            elif val <= 1.0:
+                return "green"
+            elif val <= 2.0:
+                return "yellow"
+            else:
+                return "red"
+        except:
+            return "white"
         
-        # Obtener IDs
+    def _generar_tabla_mayores_errores(self, e):
+        """Genera la tabla modularizada con la nueva lógica de colores."""
+        
+        # 1. Filtros
         edicion_id = None
         anio_filtro = None
-        
         if self.temp_camp_err and self.temp_anio_err:
             for ed in self.cache_ediciones_modal:
                 if ed[1] == self.temp_camp_err and ed[2] == self.temp_anio_err:
-                    edicion_id = ed[0]
-                    break
+                    edicion_id = ed[0]; break
         elif self.temp_anio_err:
             anio_filtro = self.temp_anio_err
 
-        # Spinner
+        # 2. Spinner
         loading = ft.ProgressBar(width=200, color="red")
-        self.dlg_selector_errores.content = ft.Column([ft.Text("Analizando histórico..."), loading], height=100, alignment=ft.MainAxisAlignment.CENTER)
+        self.dlg_selector_errores.content = ft.Column([ft.Text("Procesando datos..."), loading], height=100, alignment=ft.MainAxisAlignment.CENTER)
         self.dlg_selector_errores.actions = []
         self.dlg_selector_errores.update()
 
         def _tarea():
             time.sleep(0.5)
             bd = BaseDeDatos()
-            # Pasamos usuario=None para que traiga TODOS
             datos = bd.obtener_ranking_mayores_errores(usuario=None, edicion_id=edicion_id, anio=anio_filtro)
             
-            filas = []
-            for fila in datos:
+            # --- LÓGICA DE DATOS ---
+            filas_filtradas = []
+            if datos:
+                limite_ranking = 10
+                valor_corte = -1
+                for i, fila in enumerate(datos):
+                    error_actual = fila[8]
+                    if i < limite_ranking:
+                        filas_filtradas.append(fila)
+                        if i == (limite_ranking - 1): valor_corte = error_actual
+                    elif error_actual == valor_corte:
+                        filas_filtradas.append(fila)
+                    else: break
+            
+            # --- CÁLCULO DE ANCHOS ---
+            w_cols = [130, 140, 100, 100, 60, 60, 80] 
+            w_spacing = 10
+            
+            # Ancho neto de la tabla
+            ancho_tabla = sum(w_cols) + (w_spacing * (len(w_cols) - 1))
+            
+            # Ancho del área de scroll
+            ancho_scroll_container = ancho_tabla + 20
+
+            # Filas visuales
+            filas_visuales = []
+            previous_error = None
+
+            for fila in filas_filtradas:
                 user = fila[0]
                 rival = fila[1]
-                fecha_partido = fila[2].strftime("%d/%m/%Y") if fila[2] else "-"
-                
+                f_part = fila[2].strftime("%d/%m %H:%M") if fila[2] else "-"
+                f_pron = fila[3].strftime("%d/%m %H:%M") if fila[3] else "-"
                 pc, pr = fila[4], fila[5]
                 rc, rr = fila[6], fila[7]
                 err_abs = fila[8]
-                
                 pron_str = f"{pc}-{pr}"
                 res_str = f"{rc}-{rr}"
                 err_str = f"{int(err_abs)}" if err_abs is not None else "0"
 
-                filas.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.Container(content=ft.Text(user, weight="bold", color="white"), width=120)),
-                    ft.DataCell(ft.Container(content=ft.Text(rival, color="white70"), width=150)),
-                    ft.DataCell(ft.Container(content=ft.Text(fecha_partido, size=12), width=90)),
-                    ft.DataCell(ft.Container(content=ft.Text(pron_str, color="cyan", weight="bold"), alignment=ft.alignment.center, width=60)),
-                    ft.DataCell(ft.Container(content=ft.Text(res_str, color="yellow", weight="bold"), alignment=ft.alignment.center, width=60)),
-                    ft.DataCell(ft.Container(content=ft.Text(err_str, color="red", weight="bold", size=16), alignment=ft.alignment.center, width=60)),
+                if previous_error is not None and err_abs == previous_error:
+                    pass 
+                previous_error = err_abs
+
+                # --- LLAMADA A LA FUNCIÓN MODULAR DE COLOR ---
+                color_error = self._obtener_color_error(err_abs)
+
+                filas_visuales.append(ft.DataRow(cells=[
+                    ft.DataCell(ft.Container(content=ft.Text(user, weight="bold", size=13, color="white"), width=w_cols[0], alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(rival, color="white70", size=13), width=w_cols[1], alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(f_part, size=12), width=w_cols[2], alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(f_pron, size=12, color="cyan"), width=w_cols[3], alignment=ft.alignment.center)),
+                    ft.DataCell(ft.Container(content=ft.Text(pron_str, color="cyan", weight="bold"), alignment=ft.alignment.center, width=w_cols[4])),
+                    ft.DataCell(ft.Container(content=ft.Text(res_str, color="yellow", weight="bold"), alignment=ft.alignment.center, width=w_cols[5])),
+                    # Usamos la variable color_error
+                    ft.DataCell(ft.Container(content=ft.Text(err_str, color=color_error, weight="bold", size=16), alignment=ft.alignment.center, width=w_cols[6])),
                 ]))
 
             # Tabla
             tabla = ft.DataTable(
                 columns=[
-                    ft.DataColumn(ft.Text("Usuario", weight="bold")),
-                    ft.DataColumn(ft.Text("Rival", weight="bold")),
-                    ft.DataColumn(ft.Text("Fecha", weight="bold")),
-                    ft.DataColumn(ft.Text("Pron.", weight="bold")),
-                    ft.DataColumn(ft.Text("Res.", weight="bold")),
-                    ft.DataColumn(ft.Text("Error", weight="bold"), numeric=True),
+                    ft.DataColumn(ft.Container(ft.Text("Usuario", weight="bold"), width=w_cols[0], alignment=ft.alignment.center)),
+                    ft.DataColumn(ft.Container(ft.Text("Rival", weight="bold"), width=w_cols[1], alignment=ft.alignment.center)),
+                    ft.DataColumn(ft.Container(ft.Text("F. Partido", weight="bold"), width=w_cols[2], alignment=ft.alignment.center)),
+                    ft.DataColumn(ft.Container(ft.Text("F. Pronos.", weight="bold"), width=w_cols[3], alignment=ft.alignment.center)),
+                    ft.DataColumn(ft.Container(ft.Text("Pron.", weight="bold"), width=w_cols[4], alignment=ft.alignment.center)),
+                    ft.DataColumn(ft.Container(ft.Text("Res.", weight="bold"), width=w_cols[5], alignment=ft.alignment.center)),
+                    ft.DataColumn(ft.Container(ft.Text("Error", weight="bold"), width=w_cols[6], alignment=ft.alignment.center)),
                 ],
-                rows=filas,
+                rows=filas_visuales,
                 border=ft.border.all(1, "white10"),
                 vertical_lines=ft.border.BorderSide(1, "white10"),
                 horizontal_lines=ft.border.BorderSide(1, "white10"),
                 heading_row_color="black",
                 data_row_max_height=50,
-                column_spacing=10
+                column_spacing=w_spacing,
+                horizontal_margin=0,
+                width=ancho_tabla 
             )
 
-            # Dimensiones dinámicas basadas en la ventana principal
-            ancho_ventana = self.page.width - 50
-            alto_ventana = self.page.height - 100
-            
-            # Altura específica para mostrar aprox 10 filas + header
-            alto_tabla = 600 if alto_ventana > 600 else alto_ventana - 100
+            # --- SCROLL ---
+            columna_scroll = ft.Column(
+                controls=[tabla],
+                scroll=ft.ScrollMode.ALWAYS, 
+                height=550, 
+                width=ancho_scroll_container,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER 
+            )
 
             contenido_final = ft.Column(
                 controls=[
-                    ft.Text("Ranking Global de Mayores Errores 🤡", size=20, weight="bold"),
-                    ft.Text("Ordenado por error absoluto descendente (Top 100)", size=12, color="white54"),
-                    ft.Divider(),
-                    ft.Container(
-                        content=ft.Column(
-                            controls=[tabla], 
-                            scroll=ft.ScrollMode.AUTO
-                        ),
-                        height=alto_tabla, 
-                        border=ft.border.all(1, "white10"),
-                        border_radius=8,
-                        expand=True
+                    ft.Row(
+                        controls=[
+                            ft.Text("Ranking de Mayores Errores 🤡", size=20, weight="bold"),
+                            ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_tabla_errores))
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     ),
-                    ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_tabla_errores))], alignment=ft.MainAxisAlignment.END)
+                    ft.Text("Top 10 (con empates) - Ordenado por error absoluto", size=12, color="white54"),
+                    ft.Divider(),
+                    
+                    columna_scroll
                 ],
+                spacing=10,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                width=ancho_scroll_container 
             )
 
-            # Usamos un contenedor que se adapte al tamaño de la pantalla
+            # --- DIÁLOGO ---
             contenedor_dialogo = ft.Container(
                 content=contenido_final,
-                width=ancho_ventana,
-                height=alto_ventana,
+                width=ancho_scroll_container + 40,
+                height=680, 
                 bgcolor="#1E1E1E",
-                padding=20
+                padding=20,
+                border_radius=10,
+                alignment=ft.alignment.center
             )
 
             self.page.close(self.dlg_selector_errores)
-            self.dlg_tabla_errores = ft.AlertDialog(content=contenedor_dialogo, modal=True)
+            self.dlg_tabla_errores = ft.AlertDialog(content=contenedor_dialogo, modal=True, inset_padding=10)
             self.page.open(self.dlg_tabla_errores)
 
         threading.Thread(target=_tarea, daemon=True).start()

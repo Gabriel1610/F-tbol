@@ -3,6 +3,7 @@ import ssl
 from email.message import EmailMessage
 import random
 import threading
+from ventana_mensaje import GestorMensajes
 
 class GestorCorreo:
     def __init__(self):
@@ -64,5 +65,18 @@ class GestorCorreo:
                 
             except Exception as e:
                 print(f"Error enviando correo: {e}")
+                self._mostrar_mensaje_admin("Error enviando correo", f"No se pudo enviar el correo a {email_destino}: {e}", "error")
 
         threading.Thread(target=_enviar, daemon=True).start()
+
+    def _mostrar_mensaje_admin(self, titulo, mensaje, tipo="error"):
+        """
+        Función auxiliar que verifica si el usuario es admin y muestra
+        una ventana de mensaje. Si no es admin, no hace nada visual.
+        """
+        # Verificamos si existe usuario logueado y si está en la lista de admins
+        if hasattr(self, 'usuario_actual') and self.usuario_actual in self.lista_administradores:
+            # Usamos GestorMensajes para mostrar el error en pantalla
+            GestorMensajes.mostrar(self.page, titulo, mensaje, tipo)
+            # Como puede ser llamado desde un hilo secundario, forzamos update
+            self.page.update()
