@@ -5351,7 +5351,7 @@ El Sistema.
             return "white"
         
     def _generar_tabla_mayores_errores(self, e):
-        """Genera la tabla con un 'colchón' inferior grande para forzar la visibilidad de la última fila."""
+        """Genera la tabla con Scroll corregido: Se expande correctamente para activar la barra."""
         
         # 1. Filtros
         edicion_id = None
@@ -5389,17 +5389,49 @@ El Sistema.
                     else: break
             
             # --- CÁLCULO DE ANCHOS ---
-            w_cols = [130, 140, 100, 100, 60, 60, 80] 
+            # Columna "Error" en 100px para que la barra de scroll tenga lugar visualmente
+            w_cols = [130, 140, 100, 100, 60, 60, 100] 
             w_spacing = 10
             
             # Ancho neto de la tabla
-            ancho_tabla = sum(w_cols) + (w_spacing * (len(w_cols) - 1))
-            
-            # Ancho del área de scroll
-            ancho_scroll_container = ancho_tabla + 60
+            ancho_tabla_neto = sum(w_cols) + (w_spacing * (len(w_cols) - 1))
+            ancho_total = ancho_tabla_neto # Sin márgenes extra
 
-            # Filas visuales
-            filas_visuales = []
+            # Estilos de borde
+            borde_gris = ft.border.all(1, "white10")
+            borde_inferior = ft.border.only(bottom=ft.border.BorderSide(1, "white10"))
+            borde_derecho = ft.border.only(right=ft.border.BorderSide(1, "white10"))
+
+            # --- 1. CONSTRUCCIÓN DEL ENCABEZADO (FIJO) ---
+            titulos = ["Usuario", "Rival", "F. Partido", "F. Pronos.", "Pron.", "Res.", "Error"]
+            celdas_header = []
+            for i, titulo in enumerate(titulos):
+                estilo_borde = borde_derecho if i < len(titulos) - 1 else None
+                
+                celdas_header.append(
+                    ft.Container(
+                        content=ft.Text(titulo, weight="bold", size=14, color="white"),
+                        width=w_cols[i],
+                        alignment=ft.alignment.center,
+                        border=estilo_borde
+                    )
+                )
+            
+            header_row = ft.Container(
+                content=ft.Row(
+                    controls=celdas_header,
+                    spacing=w_spacing,
+                    alignment=ft.MainAxisAlignment.START
+                ),
+                bgcolor="black",
+                height=60,
+                border=borde_inferior,
+                padding=0,
+                width=ancho_total
+            )
+
+            # --- 2. CONSTRUCCIÓN DEL CUERPO (SCROLLEABLE) ---
+            rows_controls = []
             previous_error = None
 
             for fila in filas_filtradas:
@@ -5418,55 +5450,64 @@ El Sistema.
                     pass 
                 previous_error = err_abs
 
-                # Color dinámico
                 color_error = self._obtener_color_error(err_abs)
 
-                filas_visuales.append(ft.DataRow(cells=[
-                    ft.DataCell(ft.Container(content=ft.Text(user, weight="bold", size=13, color="white"), width=w_cols[0], alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(rival, color="white70", size=13), width=w_cols[1], alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(f_part, size=12), width=w_cols[2], alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(f_pron, size=12, color="cyan"), width=w_cols[3], alignment=ft.alignment.center)),
-                    ft.DataCell(ft.Container(content=ft.Text(pron_str, color="cyan", weight="bold"), alignment=ft.alignment.center, width=w_cols[4])),
-                    ft.DataCell(ft.Container(content=ft.Text(res_str, color="yellow", weight="bold"), alignment=ft.alignment.center, width=w_cols[5])),
-                    ft.DataCell(ft.Container(content=ft.Text(err_str, color=color_error, weight="bold", size=16), alignment=ft.alignment.center, width=w_cols[6])),
-                ]))
+                celdas_fila = []
+                datos_fila = [
+                    (user, "white", True),
+                    (rival, "white70", False),
+                    (f_part, "white", False),
+                    (f_pron, "cyan", False),
+                    (pron_str, "cyan", True),
+                    (res_str, "yellow", True),
+                    (err_str, color_error, True)
+                ]
 
-            # Tabla
-            tabla = ft.DataTable(
-                columns=[
-                    ft.DataColumn(ft.Container(ft.Text("Usuario", weight="bold"), width=w_cols[0], alignment=ft.alignment.center)),
-                    ft.DataColumn(ft.Container(ft.Text("Rival", weight="bold"), width=w_cols[1], alignment=ft.alignment.center)),
-                    ft.DataColumn(ft.Container(ft.Text("F. Partido", weight="bold"), width=w_cols[2], alignment=ft.alignment.center)),
-                    ft.DataColumn(ft.Container(ft.Text("F. Pronos.", weight="bold"), width=w_cols[3], alignment=ft.alignment.center)),
-                    ft.DataColumn(ft.Container(ft.Text("Pron.", weight="bold"), width=w_cols[4], alignment=ft.alignment.center)),
-                    ft.DataColumn(ft.Container(ft.Text("Res.", weight="bold"), width=w_cols[5], alignment=ft.alignment.center)),
-                    ft.DataColumn(ft.Container(ft.Text("Error", weight="bold"), width=w_cols[6], alignment=ft.alignment.center)),
-                ],
-                rows=filas_visuales,
-                border=ft.border.all(1, "white10"),
-                vertical_lines=ft.border.BorderSide(1, "white10"),
-                horizontal_lines=ft.border.BorderSide(1, "white10"),
-                heading_row_color="black",
-                heading_row_height=60,
-                data_row_max_height=50,
-                column_spacing=w_spacing,
-                horizontal_margin=0,
-                width=ancho_tabla 
+                for i, (txt, col, bold) in enumerate(datos_fila):
+                    estilo_borde = borde_derecho if i < len(datos_fila) - 1 else None
+                    size_txt = 16 if i == 6 else (13 if i < 2 else 12)
+                    
+                    celdas_fila.append(
+                        ft.Container(
+                            content=ft.Text(txt, weight="bold" if bold else "normal", size=size_txt, color=col),
+                            width=w_cols[i],
+                            alignment=ft.alignment.center,
+                            border=estilo_borde
+                        )
+                    )
+
+                row_visual = ft.Container(
+                    content=ft.Row(
+                        controls=celdas_fila,
+                        spacing=w_spacing,
+                        alignment=ft.MainAxisAlignment.START
+                    ),
+                    height=50,
+                    border=borde_inferior,
+                    padding=0
+                )
+                rows_controls.append(row_visual)
+
+            body_column = ft.Column(
+                controls=rows_controls,
+                scroll=ft.ScrollMode.AUTO, 
+                expand=True,
+                spacing=0
             )
 
-            # --- SCROLL ---
-            columna_scroll = ft.Column(
-                controls=[
-                    tabla,
-                    # --- SOLUCIÓN: COLCHÓN INFERIOR DE 50px ---
-                    # Esto empuja la tabla hacia arriba al hacer scroll, 
-                    # despegando la última fila del borde de la ventana.
-                    ft.Container(height=50) 
-                ],
-                scroll=ft.ScrollMode.ALWAYS, 
-                height=550, # Altura visible fija (Viewport)
-                width=ancho_scroll_container,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER 
+            # --- 3. ENSAMBLADO FINAL ---
+            tabla_simulada = ft.Container(
+                content=ft.Column(
+                    controls=[
+                        header_row,
+                        body_column
+                    ],
+                    spacing=0,
+                    expand=True
+                ),
+                border=borde_gris,
+                width=ancho_total,
+                expand=True  # <--- CRUCIAL: ESTO FALTABA PARA ACTIVAR EL SCROLL
             )
 
             contenido_final = ft.Column(
@@ -5480,19 +5521,21 @@ El Sistema.
                     ),
                     ft.Text("Top 10 (con empates) - Ordenado por error absoluto", size=12, color="white54"),
                     ft.Divider(),
-                    
-                    columna_scroll
+                    tabla_simulada
                 ],
                 spacing=10,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                width=ancho_scroll_container 
+                expand=True 
             )
 
-            # --- DIÁLOGO ---
+            # --- 4. DIÁLOGO ADAPTABLE ---
+            alto_pantalla = self.page.height if self.page.height else 700
+            alto_dialogo = int(alto_pantalla - 100)
+
             contenedor_dialogo = ft.Container(
                 content=contenido_final,
-                width=ancho_scroll_container + 40,
-                # Sin height fijo en el diálogo para que se adapte al contenedor interno
+                width=ancho_total + 40,
+                height=alto_dialogo, 
                 bgcolor="#1E1E1E",
                 padding=20,
                 border_radius=10,
@@ -5500,11 +5543,17 @@ El Sistema.
             )
 
             self.page.close(self.dlg_selector_errores)
-            self.dlg_tabla_errores = ft.AlertDialog(content=contenedor_dialogo, modal=True, inset_padding=10)
+            
+            self.dlg_tabla_errores = ft.AlertDialog(
+                content=contenedor_dialogo, 
+                modal=True, 
+                content_padding=0,
+                bgcolor=ft.Colors.TRANSPARENT 
+            )
             self.page.open(self.dlg_tabla_errores)
 
         threading.Thread(target=_tarea, daemon=True).start()
-    
+        
     # --- Lógica de selección para el modal de Errores (similar a torta pero independiente) ---
     def _sel_torneo_err(self, e):
         nombre = e.control.data
