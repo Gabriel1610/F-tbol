@@ -3233,316 +3233,280 @@ El Sistema.
         
         self.page.update()
 
-        def _tarea_en_segundo_plano():
-            time.sleep(0.5) 
-            try:
-                bd = BaseDeDatos()
-                
-                # ------------------------------------------
-                # 1. RANKING (TABLA POSICIONES)
-                # ------------------------------------------
-                if actualizar_ranking:
-                    datos_ranking = bd.obtener_ranking(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
-                    filas_ranking = []
-                    for i, fila in enumerate(datos_ranking, start=1):
-                        user = fila[0]
-                        
-                        # --- MODIFICACIÓN: Emoji Trofeo para el 1º ---
-                        user_display = f"🏆 {user}" if i == 1 else user
-                        
-                        total = fila[1]
-                        promedio_intentos = fila[7]
-                        efectividad = fila[8]
-                        raw_seconds = fila[6]
-                        
-                        # Variables para estilo de decisión
-                        estilo_texto = "-"
-                        estilo_color = "white"
+        # Lanzamos el hilo pasando los argumentos necesarios
+        threading.Thread(
+            target=self._tarea_en_segundo_plano, 
+            args=(actualizar_ranking, actualizar_copas, actualizar_partidos, actualizar_pronosticos, actualizar_admin), 
+            daemon=True
+        ).start()
 
-                        if raw_seconds is not None:
-                            val_sec = float(raw_seconds)
-                            
-                            # --- 1. Cálculo para formato visual (Días/Horas) ---
-                            dias = int(val_sec // 86400)
-                            resto = val_sec % 86400
-                            horas_disp = int(resto // 3600)
-                            resto %= 3600
-                            minutos = int(resto // 60)
-                            segundos = resto % 60
-                            txt_dias = "1 día" if dias == 1 else f"{dias} días"
-                            txt_ant = f"{txt_dias} {horas_disp:02d}:{minutos:02d}:{segundos:05.2f} h"
-                            
-                            # --- 2. Cálculo para Clasificación (Horas totales) ---
-                            horas_totales = val_sec / 3600
-                            
-                            if horas_totales > 72:
-                                estilo_texto = "🧠 Convencido temprano"
-                                estilo_color = "pink"
-                            elif horas_totales > 24:
-                                estilo_texto = "🗓️ Anticipado"
-                                estilo_color = "cyan"
-                            elif horas_totales > 6:
-                                estilo_texto = "⚖️ Balanceado"
-                                estilo_color = "orange"
-                            elif horas_totales > 1:
-                                estilo_texto = "⏳ Último momento"
-                                estilo_color = "yellow"
-                            else:
-                                estilo_texto = "🔥 Impulsivo"
-                                estilo_color = "red"
-                        else:
-                            txt_ant = "0 días 00:00:00.00 h"
-                            estilo_texto = "-" 
-
-                        txt_intentos = f"{promedio_intentos:.2f}".replace('.', ',')
-                        txt_efectividad = f"{efectividad:.2f} %".replace('.', ',')
-
-                        color_fila = "#8B0000" if user == self.usuario_seleccionado_ranking else None
-                        evento_click = lambda e, u=user: self._seleccionar_fila_ranking(u)
-
-                        filas_ranking.append(ft.DataRow(
-                            cells=[
-                                ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center, on_click=evento_click)),
-                                # Usamos user_display para mostrar el emoji, pero mantenemos user en los eventos
-                                ft.DataCell(ft.Container(content=ft.Text(user_display, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(str(total), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=100, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(str(fila[5]), color="cyan"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(txt_ant, color="cyan", size=12), width=200, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(txt_intentos, color="cyan"), width=80, alignment=ft.alignment.center, on_click=evento_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green"), width=100, alignment=ft.alignment.center, on_click=evento_click)),
-                            ],
-                            color=color_fila,
-                            data=user 
-                        ))
-                    self.tabla_estadisticas.rows = filas_ranking
-
-                # ------------------------------------------
-                # 2. COPAS (TORNEOS GANADOS)
-                # ------------------------------------------
-                if actualizar_copas and self.filtro_ranking_edicion_id is None:
-                    datos_copas = bd.obtener_torneos_ganados(self.filtro_ranking_anio)
-                    filas_copas = []
-                    for i, fila in enumerate(datos_copas, start=1):
-                        user = fila[0]
-                        copas = fila[1]
-                        
-                        # --- MODIFICACIÓN: Emoji Trofeo para el 1º ---
-                        user_display = f"🏆 {user}" if i == 1 else user
-                        
-                        filas_copas.append(ft.DataRow(cells=[
-                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center)),
-                            ft.DataCell(ft.Container(content=ft.Text(user_display, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left)),
-                            ft.DataCell(ft.Container(content=ft.Text(str(copas), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=120, alignment=ft.alignment.center)),
-                        ]))
-                    self.tabla_copas.rows = filas_copas
-
-                # ------------------------------------------
-                # 3. PARTIDOS
-                # ------------------------------------------
-                if actualizar_partidos:
-                    datos_partidos_user = bd.obtener_partidos(
-                        self.usuario_actual, 
-                        filtro_tiempo=self.filtro_temporal, 
-                        edicion_id=self.filtro_edicion_id, 
-                        rival_id=self.filtro_rival_id, 
-                        solo_sin_pronosticar=self.filtro_sin_pronosticar
-                    )
-                    filas_tabla_partidos = []
-                    for fila in datos_partidos_user:
-                        p_id = fila[0]
-                        rival = fila[1]
-                        torneo = fila[3]
-                        gc = fila[4]
-                        gr = fila[5]
-                        fecha_display_str = fila[7] 
-                        pred_cai = fila[8]
-                        pred_rival = fila[9]
-                        puntos_usuario = fila[10] 
-                        error_abs = fila[11]
-
-                        if gc is not None and gr is not None: texto_resultado = f"{gc} a {gr}"
-                        else: texto_resultado = "-"
-                        if pred_cai is not None and pred_rival is not None: texto_pronostico = f"{pred_cai} a {pred_rival}"
-                        else: texto_pronostico = "-"
-                        if puntos_usuario is None: texto_puntos = "-"
-                        else: texto_puntos = f"{puntos_usuario}"
-
-                        # --- LOGICA ERROR ABSOLUTO TABLA PARTIDOS ---
-                        if error_abs is None:
-                            txt_error = "-"
-                            color_error = "white70"
-                        else:
-                            val_err = float(error_abs)
-                            txt_error = f"{val_err:.2f}".replace('.', ',')
-                            
-                            color_error = self._obtener_color_error(val_err)
-
-                        es_partido_jugado = (gc is not None)
-
-                        if not es_partido_jugado:
-                            evt_click = lambda e, id=p_id: self._seleccionar_partido_click(id)
-                            color_fila = "#8B0000" if p_id == self.partido_a_pronosticar_id else None
-                        else:
-                            evt_click = None 
-                            color_fila = None 
-
-                        filas_tabla_partidos.append(ft.DataRow(
-                            cells=[
-                                ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=250, alignment=ft.alignment.center_left, on_click=evt_click)), 
-                                ft.DataCell(ft.Container(content=ft.Text(texto_resultado, color="white", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center, on_click=evt_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(fecha_display_str, color="white70"), width=140, alignment=ft.alignment.center_left, on_click=evt_click)), 
-                                ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left, on_click=evt_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(texto_pronostico, color="cyan", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center, on_click=evt_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(texto_puntos, color="green", weight=ft.FontWeight.BOLD, size=15), alignment=ft.alignment.center, on_click=evt_click)),
-                                ft.DataCell(ft.Container(content=ft.Text(txt_error, color=color_error, weight=ft.FontWeight.BOLD, size=14), alignment=ft.alignment.center, on_click=evt_click))
-                            ],
-                            data=p_id,
-                            color=color_fila 
-                        ))
-                    self.tabla_partidos.rows = filas_tabla_partidos
-
-                # ------------------------------------------
-                # 4. PRONÓSTICOS
-                # ------------------------------------------
-                if actualizar_pronosticos:
-                    datos_raw = bd.obtener_todos_pronosticos()
-                    filas_filtradas = []
-                    
-                    for row in datos_raw:
-                        fecha_partido = row[1]
-                        ahora = datetime.now()
-                        if self.filtro_pron_tiempo == 'futuros' and fecha_partido <= ahora: continue
-                        if self.filtro_pron_tiempo == 'jugados' and fecha_partido > ahora: continue
-                        
-                        if self.filtro_pron_torneo and self.filtro_pron_torneo != row[2]: continue
-                        if self.filtro_pron_equipo and self.filtro_pron_equipo != row[0]: continue
-                        if self.filtro_pron_usuario and self.filtro_pron_usuario != row[5]: continue
-                        
-                        gc, gr = row[3], row[4]
-                        pc, pr = row[6], row[7]
-                        pts, err_abs = row[8], row[10]
-                        
-                        res_txt = f"{gc}-{gr}" if gc is not None else "-"
-                        pron_txt = f"{pc}-{pr}"
-                        
-                        if fecha_partido.time().strftime('%H:%M:%S') == '00:00:00': fecha_disp = fecha_partido.strftime('%d/%m/%Y')
-                        else: fecha_disp = fecha_partido.strftime('%d/%m/%Y %H:%M')
-                            
-                        fecha_pred_disp = row[9].strftime('%d/%m/%Y %H:%M:%S') if row[9] else "-"
-                        
-                        puntos_disp = str(pts) if pts is not None else "-"
-                        
-                        # --- LOGICA ERROR ABSOLUTO TABLA PRONOSTICOS ---
-                        if err_abs is not None:
-                            val_err = float(err_abs)
-                            err_disp = f"{val_err:.2f}".replace('.', ',')
-                            
-                            if val_err == 0: 
-                                color_err = "cyan"
-                            elif val_err <= 1.0: 
-                                color_err = "green"
-                            elif val_err <= 2.0: 
-                                color_err = "yellow"
-                            else: 
-                                color_err = "red"
-                        else:
-                            err_disp = "-"
-                            color_err = "white70"
-
-                        row_key = hash(row)
-                        color_fila_pron = "#8B0000" if row_key == self.pronostico_seleccionado_key else None
-                        evt_click_pron = lambda e, k=row_key: self._seleccionar_fila_pronostico(k)
-
-                        filas_filtradas.append(ft.DataRow(
-                            cells=[
-                                ft.DataCell(ft.Container(content=ft.Text(row[0], color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left, on_click=evt_click_pron)), # Rival -> CON NEGRITA
-                                ft.DataCell(ft.Container(content=ft.Text(fecha_disp, color="white"), width=140, alignment=ft.alignment.center, on_click=evt_click_pron)),
-                                ft.DataCell(ft.Container(content=ft.Text(row[2], color="yellow"), width=150, alignment=ft.alignment.center_left, on_click=evt_click_pron)),
-                                ft.DataCell(ft.Container(content=ft.Text(res_txt, color="white"), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)), 
-                                ft.DataCell(ft.Container(content=ft.Text(row[5], color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left, on_click=evt_click_pron)), # Usuario -> CON NEGRITA
-                                ft.DataCell(ft.Container(content=ft.Text(pron_txt, color="cyan"), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)), 
-                                ft.DataCell(ft.Container(content=ft.Text(fecha_pred_disp, color="white70"), width=160, alignment=ft.alignment.center, on_click=evt_click_pron)), 
-                                ft.DataCell(ft.Container(content=ft.Text(puntos_disp, color="green"), width=60, alignment=ft.alignment.center, on_click=evt_click_pron)), 
-                                ft.DataCell(ft.Container(content=ft.Text(err_disp, color=color_err), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)), 
-                            ],
-                            color=color_fila_pron,
-                            data=row_key 
-                        ))
-                    
-                    if self.pronosticos_sort_col_index is not None:
-                        idx = self.pronosticos_sort_col_index
-                        reverse_sort = not self.pronosticos_sort_asc
-                        def key_sort(row):
-                            try:
-                                val = row.cells[idx].content.content.value
-                                # Índice 7 (Puntos) y 8 (Error Absoluto, última columna visible)
-                                if idx in [7, 8]: 
-                                    if val == "-": return -999
-                                    # IMPORTANTE: Reemplazar coma por punto para poder convertir a float y ordenar
-                                    val_clean = val.replace(',', '.')
-                                    return float(val_clean)
-                                
-                                if idx in [1, 6]:
-                                    try:
-                                        if ":" in val:
-                                            if val.count(":") == 2:
-                                                return datetime.strptime(val, "%d/%m/%Y %H:%M:%S")
-                                            if val.count("/") == 2: return datetime.strptime(val, "%d/%m/%Y %H:%M")
-                                            return datetime.strptime(val, "%d/%m %H:%M")
-                                        return datetime.strptime(val, "%d/%m/%Y")
-                                    except: return val
-                                return str(val).lower()
-                            except: return ""
-                        filas_filtradas.sort(key=key_sort, reverse=reverse_sort)
-                    
-                    self.tabla_pronosticos.rows = filas_filtradas
-
-                # ------------------------------------------
-                # 5. ADMINISTRACIÓN
-                # ------------------------------------------
-                if actualizar_admin:
-                    datos_rivales = bd.obtener_rivales_completo()
-                    filas_admin = []
-                    for fila in datos_rivales:
-                        r_id = fila[0]
-                        nombre = fila[1]
-                        otro = fila[2] if fila[2] else ""
-                        color_row = "#8B0000" if r_id == self.rival_seleccionado_id else None
-                        
-                        filas_admin.append(ft.DataRow(
-                            cells=[
-                                ft.DataCell(ft.Container(content=ft.Text(nombre, color="white"), width=250, alignment=ft.alignment.center_left, on_click=lambda e, id=r_id: self._seleccionar_rival_admin(id))),
-                                ft.DataCell(ft.Container(content=ft.Text(otro, color="cyan"), width=250, alignment=ft.alignment.center_left, on_click=lambda e, id=r_id: self._seleccionar_rival_admin(id))),
-                            ],
-                            data=r_id,
-                            color=color_row
-                        ))
-                    self.tabla_rivales.rows = filas_admin
-
-            except Exception as e:
-                self._mostrar_mensaje_general("Error recargando datos", f"No se pudieron recargar los datos: {e}", "error")
+    def _tarea_en_segundo_plano(self, actualizar_ranking, actualizar_copas, actualizar_partidos, actualizar_pronosticos, actualizar_admin):
+        """
+        Esta función se ejecuta en un hilo separado.
+        """
+        time.sleep(0.5) 
+        try:
+            bd = BaseDeDatos()
             
-            finally:
-                self.loading.visible = False
-                self.loading_copas.visible = False 
-                self.loading_partidos.visible = False
-                self.loading_pronosticos.visible = False 
-                self.loading_admin.visible = False
-                
-                if actualizar_partidos: 
-                    self.cargando_partidos = False
-                    self._bloquear_botones_filtros(False) 
-                    self._actualizar_botones_partidos_visual()
-                if actualizar_pronosticos:
-                    self._actualizar_botones_pronosticos_visual()
+            # ------------------------------------------
+            # 1. RANKING (TABLA POSICIONES)
+            # ------------------------------------------
+            if actualizar_ranking:
+                datos_ranking = bd.obtener_ranking(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
+                filas_ranking = []
+                for i, fila in enumerate(datos_ranking, start=1):
+                    user = fila[0]
+                    user_display = f"🏆 {user}" if i == 1 else user
+                    total = fila[1]
+                    promedio_intentos = fila[7]
+                    efectividad = fila[8]
+                    raw_seconds = fila[6]
                     
-                self.page.update()
+                    if raw_seconds is not None:
+                        val_sec = float(raw_seconds)
+                        dias = int(val_sec // 86400)
+                        resto = val_sec % 86400
+                        horas_disp = int(resto // 3600)
+                        resto %= 3600
+                        minutos = int(resto // 60)
+                        segundos = resto % 60
+                        txt_dias = "1 día" if dias == 1 else f"{dias} días"
+                        txt_ant = f"{txt_dias} {horas_disp:02d}:{minutos:02d}:{segundos:05.2f} h"
+                    else:
+                        txt_ant = "0 días 00:00:00.00 h"
 
-        threading.Thread(target=_tarea_en_segundo_plano, daemon=True).start()
+                    txt_intentos = f"{promedio_intentos:.2f}".replace('.', ',')
+                    txt_efectividad = f"{efectividad:.2f} %".replace('.', ',')
 
+                    color_fila = "#8B0000" if user == self.usuario_seleccionado_ranking else None
+                    evento_click = lambda e, u=user: self._seleccionar_fila_ranking(u)
+
+                    filas_ranking.append(ft.DataRow(
+                        cells=[
+                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(user_display, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(total), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=100, alignment=ft.alignment.center, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[5]), color="cyan"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_ant, color="cyan", size=12), width=200, alignment=ft.alignment.center, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_intentos, color="cyan"), width=80, alignment=ft.alignment.center, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green"), width=100, alignment=ft.alignment.center, on_click=evento_click)),
+                        ],
+                        color=color_fila,
+                        data=user 
+                    ))
+                self.tabla_estadisticas.rows = filas_ranking
+
+            # ------------------------------------------
+            # 2. COPAS (TORNEOS GANADOS)
+            # ------------------------------------------
+            if actualizar_copas and self.filtro_ranking_edicion_id is None:
+                datos_copas = bd.obtener_torneos_ganados(self.filtro_ranking_anio)
+                filas_copas = []
+                for i, fila in enumerate(datos_copas, start=1):
+                    user = fila[0]
+                    copas = fila[1]
+                    user_display = f"🏆 {user}" if i == 1 else user
+                    
+                    filas_copas.append(ft.DataRow(cells=[
+                        ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center)),
+                        ft.DataCell(ft.Container(content=ft.Text(user_display, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left)),
+                        ft.DataCell(ft.Container(content=ft.Text(str(copas), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=120, alignment=ft.alignment.center)),
+                    ]))
+                self.tabla_copas.rows = filas_copas
+
+            # ------------------------------------------
+            # 3. PARTIDOS
+            # ------------------------------------------
+            if actualizar_partidos:
+                datos_partidos_user = bd.obtener_partidos(
+                    self.usuario_actual, 
+                    filtro_tiempo=self.filtro_temporal, 
+                    edicion_id=self.filtro_edicion_id, 
+                    rival_id=self.filtro_rival_id, 
+                    solo_sin_pronosticar=self.filtro_sin_pronosticar
+                )
+                filas_tabla_partidos = []
+                for fila in datos_partidos_user:
+                    p_id = fila[0]
+                    rival = fila[1]
+                    torneo = fila[3]
+                    gc = fila[4]
+                    gr = fila[5]
+                    fecha_display_str = fila[7] 
+                    pred_cai = fila[8]
+                    pred_rival = fila[9]
+                    puntos_usuario = fila[10] 
+                    error_abs = fila[11]
+
+                    if gc is not None and gr is not None: texto_resultado = f"{gc} a {gr}"
+                    else: texto_resultado = "-"
+                    if pred_cai is not None and pred_rival is not None: texto_pronostico = f"{pred_cai} a {pred_rival}"
+                    else: texto_pronostico = "-"
+                    if puntos_usuario is None: texto_puntos = "-"
+                    else: texto_puntos = f"{puntos_usuario}"
+
+                    # --- LOGICA ERROR ABSOLUTO TABLA PARTIDOS ---
+                    if error_abs is None:
+                        txt_error = "-"
+                        color_error = "white70"
+                    else:
+                        val_err = float(error_abs)
+                        txt_error = f"{val_err:.2f}".replace('.', ',')
+                        # USO DE LA FUNCIÓN MODULAR
+                        color_error = self._obtener_color_error(val_err)
+
+                    es_partido_jugado = (gc is not None)
+
+                    if not es_partido_jugado:
+                        evt_click = lambda e, id=p_id: self._seleccionar_partido_click(id)
+                        color_fila = "#8B0000" if p_id == self.partido_a_pronosticar_id else None
+                    else:
+                        evt_click = None 
+                        color_fila = None 
+
+                    filas_tabla_partidos.append(ft.DataRow(
+                        cells=[
+                            ft.DataCell(ft.Container(content=ft.Text(str(rival), weight=ft.FontWeight.BOLD, color="white", no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS), width=250, alignment=ft.alignment.center_left, on_click=evt_click)), 
+                            ft.DataCell(ft.Container(content=ft.Text(texto_resultado, color="white", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center, on_click=evt_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(fecha_display_str, color="white70"), width=140, alignment=ft.alignment.center_left, on_click=evt_click)), 
+                            ft.DataCell(ft.Container(content=ft.Text(str(torneo), color="yellow", weight=ft.FontWeight.BOLD), width=150, alignment=ft.alignment.center_left, on_click=evt_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(texto_pronostico, color="cyan", weight=ft.FontWeight.BOLD), alignment=ft.alignment.center, on_click=evt_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(texto_puntos, color="green", weight=ft.FontWeight.BOLD, size=15), alignment=ft.alignment.center, on_click=evt_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_error, color=color_error, weight=ft.FontWeight.BOLD, size=14), alignment=ft.alignment.center, on_click=evt_click))
+                        ],
+                        data=p_id,
+                        color=color_fila 
+                    ))
+                self.tabla_partidos.rows = filas_tabla_partidos
+
+            # ------------------------------------------
+            # 4. PRONÓSTICOS
+            # ------------------------------------------
+            if actualizar_pronosticos:
+                datos_raw = bd.obtener_todos_pronosticos()
+                filas_filtradas = []
+                
+                for row in datos_raw:
+                    fecha_partido = row[1]
+                    ahora = datetime.now()
+                    if self.filtro_pron_tiempo == 'futuros' and fecha_partido <= ahora: continue
+                    if self.filtro_pron_tiempo == 'jugados' and fecha_partido > ahora: continue
+                    
+                    if self.filtro_pron_torneo and self.filtro_pron_torneo != row[2]: continue
+                    if self.filtro_pron_equipo and self.filtro_pron_equipo != row[0]: continue
+                    if self.filtro_pron_usuario and self.filtro_pron_usuario != row[5]: continue
+                    
+                    gc, gr = row[3], row[4]
+                    pc, pr = row[6], row[7]
+                    pts, err_abs = row[8], row[10]
+                    
+                    res_txt = f"{gc}-{gr}" if gc is not None else "-"
+                    pron_txt = f"{pc}-{pr}"
+                    
+                    if fecha_partido.time().strftime('%H:%M:%S') == '00:00:00': fecha_disp = fecha_partido.strftime('%d/%m/%Y')
+                    else: fecha_disp = fecha_partido.strftime('%d/%m/%Y %H:%M')
+                        
+                    fecha_pred_disp = row[9].strftime('%d/%m/%Y %H:%M:%S') if row[9] else "-"
+                    puntos_disp = str(pts) if pts is not None else "-"
+                    
+                    # --- LOGICA ERROR ABSOLUTO TABLA PRONOSTICOS ---
+                    if err_abs is not None:
+                        val_err = float(err_abs)
+                        # MODIFICADO: Convertir a entero antes de mostrar
+                        err_disp = str(int(val_err))
+                        color_err = self._obtener_color_error(val_err)
+                    else:
+                        err_disp = "-"
+                        color_err = "white70"
+
+                    row_key = hash(row)
+                    color_fila_pron = "#8B0000" if row_key == self.pronostico_seleccionado_key else None
+                    evt_click_pron = lambda e, k=row_key: self._seleccionar_fila_pronostico(k)
+
+                    filas_filtradas.append(ft.DataRow(
+                        cells=[
+                            ft.DataCell(ft.Container(content=ft.Text(row[0], color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center_left, on_click=evt_click_pron)), 
+                            ft.DataCell(ft.Container(content=ft.Text(fecha_disp, color="white"), width=140, alignment=ft.alignment.center, on_click=evt_click_pron)),
+                            ft.DataCell(ft.Container(content=ft.Text(row[2], color="yellow"), width=150, alignment=ft.alignment.center_left, on_click=evt_click_pron)),
+                            ft.DataCell(ft.Container(content=ft.Text(res_txt, color="white"), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)), 
+                            ft.DataCell(ft.Container(content=ft.Text(row[5], color="white", weight=ft.FontWeight.BOLD), width=100, alignment=ft.alignment.center_left, on_click=evt_click_pron)), 
+                            ft.DataCell(ft.Container(content=ft.Text(pron_txt, color="cyan"), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)), 
+                            ft.DataCell(ft.Container(content=ft.Text(fecha_pred_disp, color="white70"), width=160, alignment=ft.alignment.center, on_click=evt_click_pron)), 
+                            ft.DataCell(ft.Container(content=ft.Text(puntos_disp, color="green"), width=60, alignment=ft.alignment.center, on_click=evt_click_pron)), 
+                            ft.DataCell(ft.Container(content=ft.Text(err_disp, color=color_err), width=80, alignment=ft.alignment.center, on_click=evt_click_pron)), 
+                        ],
+                        color=color_fila_pron,
+                        data=row_key 
+                    ))
+                
+                if self.pronosticos_sort_col_index is not None:
+                    idx = self.pronosticos_sort_col_index
+                    reverse_sort = not self.pronosticos_sort_asc
+                    def key_sort(row):
+                        try:
+                            val = row.cells[idx].content.content.value
+                            if idx in [7, 8]: 
+                                if val == "-": return -999
+                                val_clean = val.replace(',', '.')
+                                return float(val_clean)
+                            if idx in [1, 6]:
+                                try:
+                                    if ":" in val:
+                                        if val.count(":") == 2: return datetime.strptime(val, "%d/%m/%Y %H:%M:%S")
+                                        if val.count("/") == 2: return datetime.strptime(val, "%d/%m/%Y %H:%M")
+                                        return datetime.strptime(val, "%d/%m %H:%M")
+                                    return datetime.strptime(val, "%d/%m/%Y")
+                                except: return val
+                            return str(val).lower()
+                        except: return ""
+                    filas_filtradas.sort(key=key_sort, reverse=reverse_sort)
+                
+                self.tabla_pronosticos.rows = filas_filtradas
+
+            # ------------------------------------------
+            # 5. ADMINISTRACIÓN
+            # ------------------------------------------
+            if actualizar_admin:
+                datos_rivales = bd.obtener_rivales_completo()
+                filas_admin = []
+                for fila in datos_rivales:
+                    r_id = fila[0]
+                    nombre = fila[1]
+                    otro = fila[2] if fila[2] else ""
+                    color_row = "#8B0000" if r_id == self.rival_seleccionado_id else None
+                    
+                    filas_admin.append(ft.DataRow(
+                        cells=[
+                            ft.DataCell(ft.Container(content=ft.Text(nombre, color="white"), width=250, alignment=ft.alignment.center_left, on_click=lambda e, id=r_id: self._seleccionar_rival_admin(id))),
+                            ft.DataCell(ft.Container(content=ft.Text(otro, color="cyan"), width=250, alignment=ft.alignment.center_left, on_click=lambda e, id=r_id: self._seleccionar_rival_admin(id))),
+                        ],
+                        data=r_id,
+                        color=color_row
+                    ))
+                self.tabla_rivales.rows = filas_admin
+
+        except Exception as e:
+            self._mostrar_mensaje_general("Error recargando datos", f"No se pudieron recargar los datos: {e}", "error")
+        
+        finally:
+            self.loading.visible = False
+            self.loading_copas.visible = False 
+            self.loading_partidos.visible = False
+            self.loading_pronosticos.visible = False 
+            self.loading_admin.visible = False
+            
+            if actualizar_partidos: 
+                self.cargando_partidos = False
+                self._bloquear_botones_filtros(False) 
+                self._actualizar_botones_partidos_visual()
+            if actualizar_pronosticos:
+                self._actualizar_botones_pronosticos_visual()
+                
+            self.page.update()
+            
     def _abrir_modal_racha_record(self, e):
         """Abre la ventana modal con la Racha Récord."""
         
@@ -5387,7 +5351,7 @@ El Sistema.
             return "white"
         
     def _generar_tabla_mayores_errores(self, e):
-        """Genera la tabla modularizada con la nueva lógica de colores."""
+        """Genera la tabla con un 'colchón' inferior grande para forzar la visibilidad de la última fila."""
         
         # 1. Filtros
         edicion_id = None
@@ -5432,7 +5396,7 @@ El Sistema.
             ancho_tabla = sum(w_cols) + (w_spacing * (len(w_cols) - 1))
             
             # Ancho del área de scroll
-            ancho_scroll_container = ancho_tabla + 20
+            ancho_scroll_container = ancho_tabla + 60
 
             # Filas visuales
             filas_visuales = []
@@ -5454,7 +5418,7 @@ El Sistema.
                     pass 
                 previous_error = err_abs
 
-                # --- LLAMADA A LA FUNCIÓN MODULAR DE COLOR ---
+                # Color dinámico
                 color_error = self._obtener_color_error(err_abs)
 
                 filas_visuales.append(ft.DataRow(cells=[
@@ -5464,7 +5428,6 @@ El Sistema.
                     ft.DataCell(ft.Container(content=ft.Text(f_pron, size=12, color="cyan"), width=w_cols[3], alignment=ft.alignment.center)),
                     ft.DataCell(ft.Container(content=ft.Text(pron_str, color="cyan", weight="bold"), alignment=ft.alignment.center, width=w_cols[4])),
                     ft.DataCell(ft.Container(content=ft.Text(res_str, color="yellow", weight="bold"), alignment=ft.alignment.center, width=w_cols[5])),
-                    # Usamos la variable color_error
                     ft.DataCell(ft.Container(content=ft.Text(err_str, color=color_error, weight="bold", size=16), alignment=ft.alignment.center, width=w_cols[6])),
                 ]))
 
@@ -5484,6 +5447,7 @@ El Sistema.
                 vertical_lines=ft.border.BorderSide(1, "white10"),
                 horizontal_lines=ft.border.BorderSide(1, "white10"),
                 heading_row_color="black",
+                heading_row_height=60,
                 data_row_max_height=50,
                 column_spacing=w_spacing,
                 horizontal_margin=0,
@@ -5492,9 +5456,15 @@ El Sistema.
 
             # --- SCROLL ---
             columna_scroll = ft.Column(
-                controls=[tabla],
+                controls=[
+                    tabla,
+                    # --- SOLUCIÓN: COLCHÓN INFERIOR DE 50px ---
+                    # Esto empuja la tabla hacia arriba al hacer scroll, 
+                    # despegando la última fila del borde de la ventana.
+                    ft.Container(height=50) 
+                ],
                 scroll=ft.ScrollMode.ALWAYS, 
-                height=550, 
+                height=550, # Altura visible fija (Viewport)
                 width=ancho_scroll_container,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER 
             )
@@ -5522,7 +5492,7 @@ El Sistema.
             contenedor_dialogo = ft.Container(
                 content=contenido_final,
                 width=ancho_scroll_container + 40,
-                height=680, 
+                # Sin height fijo en el diálogo para que se adapte al contenedor interno
                 bgcolor="#1E1E1E",
                 padding=20,
                 border_radius=10,
@@ -5534,7 +5504,7 @@ El Sistema.
             self.page.open(self.dlg_tabla_errores)
 
         threading.Thread(target=_tarea, daemon=True).start()
-
+    
     # --- Lógica de selección para el modal de Errores (similar a torta pero independiente) ---
     def _sel_torneo_err(self, e):
         nombre = e.control.data
