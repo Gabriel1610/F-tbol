@@ -678,7 +678,7 @@ El Sistema.
             color="white", 
             width=180, 
             height=30, 
-            tooltip="Analiza si tus pronósticos suelen ser optimistas, realistas o pesimistas respecto al resultado final.",
+            tooltip="Analiza si tus pronósticos suelen ser optimistas, neutrales o pesimistas respecto al resultado final.",
             style=ft.ButtonStyle(padding=5, text_style=ft.TextStyle(size=12)), 
             on_click=self._abrir_selector_grafico_torta_tendencia
         )
@@ -1577,7 +1577,7 @@ El Sistema.
                         clasificacion = "🙂 Optimista"
                         color_val = "orange"
                     elif -0.5 < indice < 0.5: 
-                        clasificacion = "⚖️ Realista"
+                        clasificacion = "⚖️ Neutral"
                         color_val = "cyan"
                     elif -1.5 < indice <= -0.5: 
                         clasificacion = "😐 Pesimista"
@@ -1884,7 +1884,8 @@ El Sistema.
 
         col_tor = ft.Column(expand=1, controls=[ft.Text("1. Torneo", weight="bold"), ft.Container(content=self.lv_torneos_graf_lp, border=ft.border.all(1, "white24"), border_radius=5)])
         col_anio = ft.Column(expand=1, controls=[ft.Text("2. Año", weight="bold"), ft.Container(content=self.lv_anios_graf_lp, border=ft.border.all(1, "white24"), border_radius=5)])
-        col_usu = ft.Column(expand=1, controls=[ft.Text("3. Usuarios (Max 3)", weight="bold"), ft.Container(content=self.lv_usuarios_graf_lp, border=ft.border.all(1, "white24"), border_radius=5)])
+        # CAMBIO: Texto actualizado a Max 4
+        col_usu = ft.Column(expand=1, controls=[ft.Text("3. Usuarios (Max 4)", weight="bold"), ft.Container(content=self.lv_usuarios_graf_lp, border=ft.border.all(1, "white24"), border_radius=5)])
 
         contenido = ft.Container(width=700, height=300, content=ft.Row(controls=[col_tor, col_anio, col_usu], spacing=20))
 
@@ -1917,10 +1918,10 @@ El Sistema.
 
     def _validar_seleccion_usuarios_grafico_lp(self, e):
         seleccionados = [c for c in self.chk_usuarios_grafico_lp if c.value]
-        if len(seleccionados) > 3:
+        if len(seleccionados) > 4:
             e.control.value = False
             e.control.update()
-            GestorMensajes.mostrar(self.page, "Límite", "Máximo 3 usuarios.", "info")
+            GestorMensajes.mostrar(self.page, "Límite", "Máximo 4 usuarios.", "info")
         self._validar_btn_grafico_lp()
 
     def _validar_btn_grafico_lp(self):
@@ -2031,7 +2032,8 @@ El Sistema.
             for i, user in enumerate(usuarios_sel):
                 items_leyenda.append(
                     ft.Row([
-                        ft.Container(width=15, height=15, bgcolor=colores[i % 3], border_radius=3),
+                        # CORRECCIÓN AQUÍ: Usar len(colores) en lugar de número fijo '3'
+                        ft.Container(width=15, height=15, bgcolor=colores[i % len(colores)], border_radius=3),
                         ft.Text(user, weight="bold", size=16)
                     ], spacing=5)
                 )
@@ -2059,8 +2061,8 @@ El Sistema.
             self.dlg_grafico_lp_full = ft.AlertDialog(content=contenido_final, modal=True, inset_padding=10)
             self.page.open(self.dlg_grafico_lp_full)
 
-        threading.Thread(target=_tarea, daemon=True).start()
-        
+        threading.Thread(target=_tarea, daemon=True).start()    
+
     def _sel_torneo_barra_modal(self, e):
         nombre = e.control.data
         self.temp_camp_barra = nombre
@@ -3941,7 +3943,6 @@ El Sistema.
             
             controles_tor = []
             for nombre in nombres_unicos:
-                # CORRECCIÓN: Se eliminó density="compact"
                 controles_tor.append(ft.ListTile(title=ft.Text(nombre, size=14), data=nombre, on_click=self._sel_torneo_graf_modal, bgcolor="#2D2D2D"))
             self.lv_torneos_graf.controls = controles_tor
             
@@ -3959,7 +3960,8 @@ El Sistema.
 
         col_tor = ft.Column(expand=1, controls=[ft.Text("1. Torneo", weight="bold"), ft.Container(content=self.lv_torneos_graf, border=ft.border.all(1, "white24"), border_radius=5)])
         col_anio = ft.Column(expand=1, controls=[ft.Text("2. Año", weight="bold"), ft.Container(content=self.lv_anios_graf, border=ft.border.all(1, "white24"), border_radius=5)])
-        col_usu = ft.Column(expand=1, controls=[ft.Text("3. Usuarios (Max 3)", weight="bold"), ft.Container(content=self.lv_usuarios_graf, border=ft.border.all(1, "white24"), border_radius=5)])
+        # CAMBIO: Texto actualizado a Max 4
+        col_usu = ft.Column(expand=1, controls=[ft.Text("3. Usuarios (Max 4)", weight="bold"), ft.Container(content=self.lv_usuarios_graf, border=ft.border.all(1, "white24"), border_radius=5)])
 
         contenido = ft.Container(width=700, height=300, content=ft.Row(controls=[col_tor, col_anio, col_usu], spacing=20))
 
@@ -3996,10 +3998,11 @@ El Sistema.
 
     def _validar_seleccion_usuarios_grafico(self, e):
         seleccionados = [c for c in self.chk_usuarios_grafico if c.value]
-        if len(seleccionados) > 3:
+        # CAMBIO: Límite aumentado a 4
+        if len(seleccionados) > 4:
             e.control.value = False
             e.control.update()
-            GestorMensajes.mostrar(self.page, "Límite", "Máximo 3 usuarios.", "info")
+            GestorMensajes.mostrar(self.page, "Límite", "Máximo 4 usuarios.", "info")
         self._validar_btn_grafico()
 
     def _validar_btn_grafico(self):
@@ -4009,7 +4012,7 @@ El Sistema.
         self.btn_generar_grafico.update()
 
     def _generar_grafico_puestos(self, e):
-        """Genera y muestra el gráfico de líneas con ejes optimizados y visibles."""
+        """Genera y muestra el gráfico de líneas con el nombre del usuario en el tooltip y título en eje Y."""
         usuarios_sel = [c.label for c in self.chk_usuarios_grafico if c.value]
         
         edicion_id = None
@@ -4029,13 +4032,11 @@ El Sistema.
                 return
 
             # 1. Determinar el rango del eje Y
-            # Buscamos el peor puesto registrado en este historial para no hacer un gráfico gigante si son pocos
             peor_puesto_registrado = 1
             for puestos in historial.values():
                 if puestos:
                     peor_puesto_registrado = max(peor_puesto_registrado, max(puestos))
             
-            # Altura = Peor puesto + 1 (para que el puesto más bajo no quede pegado al suelo)
             altura_eje = peor_puesto_registrado + 1
             
             colores = [ft.Colors.CYAN, ft.Colors.AMBER, ft.Colors.PINK, ft.Colors.GREEN]
@@ -4056,7 +4057,8 @@ El Sistema.
                         ft.LineChartDataPoint(
                             x=idx_partido + 1, 
                             y=valor_y,
-                            tooltip=f"{puesto}º" # Tooltip muestra el puesto real
+                            # Mostrar solo el usuario. Flet pondrá el indicador de color al lado.
+                            tooltip=user 
                         )
                     )
                 
@@ -4074,7 +4076,6 @@ El Sistema.
             # 3. Etiquetas Eje Y (TODAS)
             labels_y = [ft.ChartAxisLabel(value=0, label=ft.Text("Inicio", size=10, weight="bold"))]
             
-            # Mostramos TODOS los puestos involucrados
             for p in range(1, peor_puesto_registrado + 1):
                 val_y = altura_eje - p 
                 labels_y.append(
@@ -4084,7 +4085,7 @@ El Sistema.
                     )
                 )
 
-            # 4. Intervalo Eje X dinámico (para que no se amontonen si hay muchos)
+            # 4. Intervalo Eje X dinámico
             intervalo_x = 1
             if cant_partidos > 15: intervalo_x = 2
             if cant_partidos > 30: intervalo_x = 5
@@ -4093,32 +4094,33 @@ El Sistema.
             chart = ft.LineChart(
                 data_series=data_series,
                 border=ft.border.all(1, ft.Colors.WHITE10),
-                # EJE IZQUIERDO
+                # CAMBIO AQUÍ: Agregado título vertical "Puestos"
                 left_axis=ft.ChartAxis(
                     labels=labels_y,
-                    labels_size=50, # Espacio reservado para texto "1º", "10º"
+                    labels_size=50,
+                    title=ft.Text("Puestos", size=14, italic=True),
+                    title_size=30
                 ),
-                # EJE INFERIOR
                 bottom_axis=ft.ChartAxis(
                     labels_interval=intervalo_x,
                     title=ft.Text("Partido N°", size=14, italic=True),
-                    labels_size=40, # AUMENTADO: Espacio para que no se corten los números ni el título
+                    labels_size=40,
                 ),
                 tooltip_bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
                 min_y=0,
-                max_y=altura_eje + 0.2, # Un poquito de aire arriba
+                max_y=altura_eje + 0.2, 
                 min_x=0,
                 max_x=cant_partidos, 
                 horizontal_grid_lines=ft.ChartGridLines(interval=1, color=ft.Colors.WHITE10, width=1),
                 expand=True,
             )
             
-            # Leyenda
+            # Leyenda (usando len(colores) correctamente)
             items_leyenda = []
             for i, user in enumerate(usuarios_sel):
                 items_leyenda.append(
                     ft.Row([
-                        ft.Container(width=15, height=15, bgcolor=colores[i % 3], border_radius=3),
+                        ft.Container(width=15, height=15, bgcolor=colores[i % len(colores)], border_radius=3),
                         ft.Text(user, weight="bold", size=16)
                     ], spacing=5)
                 )
@@ -4138,7 +4140,6 @@ El Sistema.
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                     ),
-                    # Agregamos padding al contenedor del gráfico para evitar cortes en bordes
                     ft.Container(content=chart, expand=True, padding=ft.padding.all(20)),
                     ft.Row(items_leyenda, alignment="center")
                 ])
@@ -4833,7 +4834,7 @@ El Sistema.
         threading.Thread(target=_cargar_datos_torta, daemon=True).start()
 
     def _generar_grafico_torta_tendencia(self, e):
-        """Genera el gráfico de torta de Tendencia (Muy Optimista, Realista, etc)."""
+        """Genera el gráfico de torta de Tendencia (Muy Optimista, Neutral, etc)."""
         
         loading_content = ft.Column(
             controls=[
@@ -4892,7 +4893,7 @@ El Sistema.
             if opt > 0:
                 secciones.append(ft.PieChartSection(value=opt, title=f"{calc_pct(opt):.0f}%", color=ft.Colors.ORANGE, radius=100, title_style=ft.TextStyle(size=12, weight="bold", color="white")))
             if real > 0:
-                # CAMBIO: Cyan -> Green (Realista es "bueno/preciso")
+                # CAMBIO: Cyan -> Green (Neutral es "bueno/preciso")
                 secciones.append(ft.PieChartSection(value=real, title=f"{calc_pct(real):.0f}%", color=ft.Colors.GREEN, radius=100, title_style=ft.TextStyle(size=12, weight="bold", color="white")))
             if pes > 0:
                 # CAMBIO: Indigo -> Blue
@@ -4914,7 +4915,7 @@ El Sistema.
             items_leyenda = [
                 (ft.Colors.RED, "Muy optimista"),
                 (ft.Colors.ORANGE, "Optimista"),
-                (ft.Colors.GREEN, "Realista"),     # Nuevo color
+                (ft.Colors.GREEN, "Neutral"),     # Nuevo color
                 (ft.Colors.BLUE, "Pesimista"),     # Nuevo color
                 (ft.Colors.PURPLE, "Muy pesimista")# Nuevo color
             ]
