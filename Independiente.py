@@ -1033,25 +1033,34 @@ El Sistema.
             ft.DataColumn(ft.Container(content=ft.Text("Puntos", color="green", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center), numeric=True, on_sort=self._ordenar_tabla_pronosticos),
             ft.DataColumn(ft.Container(content=ft.Text("Error\nabsoluto", color="red", weight=ft.FontWeight.BOLD, text_align="center"), width=80, alignment=ft.alignment.center), numeric=True, on_sort=self._ordenar_tabla_pronosticos)
         ]
-        ancho_usuario = 110 
+        ancho_usuario = 130 
         columnas_estadisticas = [
-            ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center)), 
+            # 1. Puesto: Aumentado a 60 y TextAlign CENTER explícito
+            ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=60, alignment=ft.alignment.center)), 
+            # 2. Usuario
             ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Puntos\ntotales", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Pts.\ngoles CAI", color="white", text_align=ft.TextAlign.CENTER), width=120, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Pts.\ngoles rival", color="white", text_align=ft.TextAlign.CENTER), width=120, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nresultado", color="white", text_align=ft.TextAlign.CENTER, tooltip="Puntos por acertar Gana/Empata/Pierde"), width=120, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Partidos\njugados", color="cyan", text_align=ft.TextAlign.CENTER), width=120, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Anticipación\npromedio", color="cyan", text_align=ft.TextAlign.CENTER), width=200, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Promedio\nintentos", color="cyan", text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center)), 
-            ft.DataColumn(ft.Container(content=ft.Text("Efectividad\n(puntería)", color="green", text_align=ft.TextAlign.CENTER), width=100, alignment=ft.alignment.center))
+            # 3. Puntos Totales: Reducido a 80 (Sobra espacio)
+            ft.DataColumn(ft.Container(content=ft.Text("Puntos\ntotales", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center)), 
+            # 4. Pts CAI: Reducido a 95
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\ngoles CAI", color="white", text_align=ft.TextAlign.CENTER), width=95, alignment=ft.alignment.center)), 
+            # 5. Pts Rival: Reducido a 95
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\ngoles rival", color="white", text_align=ft.TextAlign.CENTER), width=95, alignment=ft.alignment.center)), 
+            # 6. Pts Resultado: Reducido a 95
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nresultado", color="white", text_align=ft.TextAlign.CENTER, tooltip="Puntos por acertar Gana/Empata/Pierde"), width=95, alignment=ft.alignment.center)), 
+            # 7. PJ: Reducido a 85
+            ft.DataColumn(ft.Container(content=ft.Text("Partidos\njugados", color="cyan", text_align=ft.TextAlign.CENTER), width=85, alignment=ft.alignment.center)), 
+            # 8. Error: Reducido a 95
+            ft.DataColumn(ft.Container(content=ft.Text("Error\npromedio", color="red", text_align=ft.TextAlign.CENTER, tooltip="Promedio de error absoluto de goles"), width=95, alignment=ft.alignment.center)),
+            # 9. Anticipación: Aumentado a 190 para centrar holgadamente
+            ft.DataColumn(ft.Container(content=ft.Text("Anticipación\npromedio", color="cyan", text_align=ft.TextAlign.CENTER), width=190, alignment=ft.alignment.center)), 
         ]
         columnas_copas = [ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Torneos ganados", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=120, alignment=ft.alignment.center))]
         columnas_rivales = [ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Otro nombre", color="cyan", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center))]
 
         # --- DEFINICIÓN DE TABLAS ---
-        self.tabla_estadisticas_header = ft.DataTable(width=1450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=15, columns=columnas_estadisticas, rows=[])
-        self.tabla_estadisticas = ft.DataTable(width=1450, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=15, columns=columnas_estadisticas, rows=[])
+        # --- DEFINICIÓN DE TABLAS ---
+        self.tabla_estadisticas_header = ft.DataTable(width=1020, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=10, columns=columnas_estadisticas, rows=[])
+        self.tabla_estadisticas = ft.DataTable(width=1020, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=10, columns=columnas_estadisticas, rows=[])
         self.tabla_copas_header = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_copas, rows=[])
         self.tabla_copas = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_copas, rows=[])
         
@@ -1174,7 +1183,7 @@ El Sistema.
                             self.loading,
                             # 1. TABLA POSICIONES (SOLA)
                             ft.Row(
-                                scroll=ft.ScrollMode.AUTO, # <--- SCROLL HORIZONTAL AGREGADO
+                                scroll=ft.ScrollMode.AUTO, 
                                 controls=[
                                     ft.Column(
                                         spacing=0,
@@ -1183,7 +1192,8 @@ El Sistema.
                                             ft.Container(
                                                 height=240, 
                                                 content=ft.Column(
-                                                    scroll=ft.ScrollMode.ALWAYS, 
+                                                    # CAMBIO AQUÍ: De ALWAYS a AUTO para que se oculte sola
+                                                    scroll=ft.ScrollMode.AUTO, 
                                                     controls=[self.tabla_estadisticas]
                                                 )
                                             )
@@ -3260,10 +3270,9 @@ El Sistema.
                     user = fila[0]
                     user_display = f"🏆 {user}" if i == 1 else user
                     total = fila[1]
-                    promedio_intentos = fila[7]
-                    efectividad = fila[8]
-                    raw_seconds = fila[6]
                     
+                    # Anticipación (índice 6)
+                    raw_seconds = fila[6]
                     if raw_seconds is not None:
                         val_sec = float(raw_seconds)
                         dias = int(val_sec // 86400)
@@ -3277,24 +3286,45 @@ El Sistema.
                     else:
                         txt_ant = "0 días 00:00:00.00 h"
 
-                    txt_intentos = f"{promedio_intentos:.2f}".replace('.', ',')
-                    txt_efectividad = f"{efectividad:.2f} %".replace('.', ',')
+                    # Error Promedio (Intentamos leer del índice 9 si existe, sino guion)
+                    try:
+                        # Asumiendo que la query devuelve el error en la posición 9
+                        # Si tu BD no lo devuelve, esto mostrará "-"
+                        raw_error = fila[9] 
+                        txt_error = f"{float(raw_error):.2f}".replace('.', ',')
+                        color_error = self._obtener_color_error(raw_error)
+                    except:
+                        txt_error = "-"
+                        color_error = "white70"
 
                     color_fila = "#8B0000" if user == self.usuario_seleccionado_ranking else None
                     evento_click = lambda e, u=user: self._seleccionar_fila_ranking(u)
 
                     filas_ranking.append(ft.DataRow(
                         cells=[
-                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white"), width=60, alignment=ft.alignment.center, on_click=evento_click)),
-                            ft.DataCell(ft.Container(content=ft.Text(user_display, weight=ft.FontWeight.BOLD, color="white"), width=110, alignment=ft.alignment.center_left, on_click=evento_click)),
-                            ft.DataCell(ft.Container(content=ft.Text(str(total), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=100, alignment=ft.alignment.center, on_click=evento_click)),
-                            ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                            ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                            ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                            ft.DataCell(ft.Container(content=ft.Text(str(fila[5]), color="cyan"), width=120, alignment=ft.alignment.center, on_click=evento_click)),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_ant, color="cyan", size=12), width=200, alignment=ft.alignment.center, on_click=evento_click)),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_intentos, color="cyan"), width=80, alignment=ft.alignment.center, on_click=evento_click)),
-                            ft.DataCell(ft.Container(content=ft.Text(txt_efectividad, color="green"), width=100, alignment=ft.alignment.center, on_click=evento_click)),
+                            # 1. Puesto (60)
+                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white", text_align=ft.TextAlign.CENTER), width=60, alignment=ft.alignment.center, on_click=evento_click)),
+                            # 2. Usuario (130)
+                            ft.DataCell(ft.Container(content=ft.Text(user_display, weight=ft.FontWeight.BOLD, color="white"), width=130, alignment=ft.alignment.center_left, on_click=evento_click)),
+                            # 3. Puntos Totales (80)
+                            ft.DataCell(ft.Container(content=ft.Text(str(total), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=80, alignment=ft.alignment.center, on_click=evento_click)),
+                            # 4. Pts CAI (95)
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white"), width=95, alignment=ft.alignment.center, on_click=evento_click)),
+                            # 5. Pts Rival (95)
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white"), width=95, alignment=ft.alignment.center, on_click=evento_click)),
+                            # 6. Pts Resultado (95)
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white"), width=95, alignment=ft.alignment.center, on_click=evento_click)),
+                            # 7. PJ (85)
+                            ft.DataCell(ft.Container(content=ft.Text(str(fila[5]), color="cyan"), width=85, alignment=ft.alignment.center, on_click=evento_click)),
+                            # 8. Error Promedio (95)
+                            ft.DataCell(ft.Container(content=ft.Text(txt_error, color=color_error, weight="bold"), width=95, alignment=ft.alignment.center, on_click=evento_click)),
+                            # 9. Anticipación (190)
+                            ft.DataCell(ft.Container(
+                                content=ft.Text(txt_ant, color="cyan", size=12, text_align=ft.TextAlign.CENTER), 
+                                width=190, 
+                                alignment=ft.alignment.center, 
+                                on_click=evento_click
+                            )),
                         ],
                         color=color_fila,
                         data=user 
