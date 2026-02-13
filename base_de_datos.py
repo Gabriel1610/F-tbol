@@ -565,11 +565,11 @@ class BaseDeDatos:
 
     def obtener_datos_evolucion_puestos(self, edicion_id, usuarios_seleccionados):
         """
-        Calcula la evolución del ranking aplicando los nuevos criterios:
+        Calcula la evolución del ranking aplicando los NUEVOS CRITERIOS:
         1. Puntos (Mayor).
-        2. Partidos Pronosticados (Mayor).
-        3. Anticipación (Mayor).
-        4. Promedio de intentos (Menor).
+        2. Partidos Jugados (Mayor).
+        3. Error Promedio (Menor).
+        4. Anticipación Promedio (Mayor).
         """
         conexion = None
         cursor = None
@@ -581,11 +581,15 @@ class BaseDeDatos:
             cursor.execute("SELECT COUNT(*) FROM usuarios")
             total_usuarios = cursor.fetchone()[0]
 
-            # 2. Obtener partidos JUGADOS ordenados por fecha
+            # 2. Obtener partidos TERMINADOS ordenados por fecha
+            # Filtro estricto: Goles no nulos y fecha pasada
             sql_partidos = """
                 SELECT id 
                 FROM partidos 
-                WHERE edicion_id = %s AND goles_independiente IS NOT NULL 
+                WHERE edicion_id = %s 
+                  AND goles_independiente IS NOT NULL 
+                  AND goles_rival IS NOT NULL
+                  AND fecha_hora < NOW()
                 ORDER BY fecha_hora ASC
             """
             cursor.execute(sql_partidos, (edicion_id,))
@@ -594,7 +598,7 @@ class BaseDeDatos:
             if not partidos:
                 return 0, total_usuarios, {}
 
-            # 3. Obtener usuarios y estructuras
+            # 3. Obtener usuarios
             cursor.execute("SELECT id, username FROM usuarios")
             usuarios_bd = cursor.fetchall()
             
@@ -603,48 +607,58 @@ class BaseDeDatos:
             
             # Acumuladores
             puntos_acumulados = {uid: 0 for uid in ids_usuarios} 
-            suma_anticipacion = {uid: 0 for uid in ids_usuarios}
-            cant_partidos_jugados = {uid: 0 for uid in ids_usuarios} # Criterio 2
-            total_intentos_acumulados = {uid: 0 for uid in ids_usuarios} # Criterio 4
+            cant_partidos_jugados = {uid: 0 for uid in ids_usuarios} 
+            suma_error_absoluto = {uid: 0.0 for uid in ids_usuarios} 
+            suma_anticipacion = {uid: 0.0 for uid in ids_usuarios}   
             
             historial_grafico = {user: [] for user in usuarios_seleccionados}
 
             # 4. Iterar partido a partido
             for partido_id in partidos:
-                # Consulta para obtener: Puntos, Anticipación y Cantidad de Intentos en ESTE partido
+                # Consulta para obtener: Puntos, Error y Anticipación en ESTE partido
+                # Usa la variable global PUNTOS
                 sql_datos_partido = f"""
                     SELECT 
                         pr.usuario_id,
-                        -- Puntos (usando último pronóstico)
-                        (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
-                        (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END) +
-                        (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END) as puntos,
-                        -- Anticipación (usando último pronóstico)
-                        TIMESTAMPDIFF(SECOND, pr.fecha_prediccion, p.fecha_hora) as segundos_anticipacion,
-                        -- Conteo de intentos totales para este partido
-                        (SELECT COUNT(*) FROM pronosticos WHERE usuario_id = pr.usuario_id AND partido_id = %s) as intentos_match
+                        -- Puntos
+                        (
+                            (CASE WHEN SIGN(CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED)) = 
+                                       SIGN(CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) 
+                                  THEN {PUNTOS} ELSE 0 END) +
+                            (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
+                            (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END)
+                        ) as puntos,
+                        -- Error Absoluto del partido
+                        (ABS(p.goles_independiente - pr.pred_goles_independiente) + 
+                         ABS(p.goles_rival - pr.pred_goles_rival)) as error_match,
+                        -- Anticipación (Segundos)
+                        TIMESTAMPDIFF(SECOND, pr.fecha_prediccion, p.fecha_hora) as segundos_anticipacion
+                    
                     FROM pronosticos pr
+                    -- FILTRO ÚLTIMO PRONÓSTICO
                     JOIN (
-                        SELECT usuario_id, MAX(fecha_prediccion) as max_fecha
+                        SELECT usuario_id, MAX(id) as max_id
                         FROM pronosticos
                         WHERE partido_id = %s
                         GROUP BY usuario_id
-                    ) last_pred ON pr.usuario_id = last_pred.usuario_id 
-                        AND pr.fecha_prediccion = last_pred.max_fecha
+                    ) last_pred ON pr.id = last_pred.max_id
                     JOIN partidos p ON pr.partido_id = p.id
-                    WHERE p.id = %s AND pr.partido_id = %s
+                    WHERE p.id = %s
                 """
-                cursor.execute(sql_datos_partido, (partido_id, partido_id, partido_id, partido_id))
+                cursor.execute(sql_datos_partido, (partido_id, partido_id))
                 resultados = cursor.fetchall()
 
                 # Actualizar acumulados
-                for uid, pts, segs, intentos in resultados:
+                for uid, pts, err, segs in resultados:
                     if uid in puntos_acumulados:
                         puntos_acumulados[uid] += pts
-                        val_sec = segs if segs is not None else 0
-                        suma_anticipacion[uid] += val_sec
                         cant_partidos_jugados[uid] += 1
-                        total_intentos_acumulados[uid] += intentos
+                        
+                        val_error = float(err) if err is not None else 0.0
+                        suma_error_absoluto[uid] += val_error
+                        
+                        val_sec = float(segs) if segs is not None else 0.0
+                        suma_anticipacion[uid] += val_sec
 
                 # --- CÁLCULO DE RANKING DEL MOMENTO ---
                 def get_sort_key(uid):
@@ -652,25 +666,21 @@ class BaseDeDatos:
                     partidos_jug = cant_partidos_jugados[uid]
                     
                     if partidos_jug > 0:
-                        # Promedio de anticipación
+                        avg_error = suma_error_absoluto[uid] / partidos_jug
                         avg_ant = suma_anticipacion[uid] / partidos_jug
-                        # Promedio de intentos (Queremos MENOR es mejor)
-                        # Usamos negativo para que al ordenar reverse=True (DESC), el valor -1.0 gane a -2.0
-                        avg_intentos = -(total_intentos_acumulados[uid] / partidos_jug)
                     else:
-                        avg_ant = 0
-                        # Si no jugó, pierde en criterio 2, el 4 ya no importa tanto, ponemos algo neutro
-                        avg_intentos = 0
+                        avg_error = 999.0 # Castigo por no jugar
+                        avg_ant = 0.0
 
-                    # Tupla de Ordenamiento:
-                    # 1. Puntos (Max)
-                    # 2. Partidos Jugados (Max) -> "Más participó gana"
-                    # 3. Anticipación (Max)
-                    # 4. Promedio Intentos (Max Negativo -> Menor promedio real)
-                    return (pts, partidos_jug, avg_ant, avg_intentos)
+                    # Tupla de Ordenamiento (Python ordena Ascendente por defecto):
+                    # 1. Puntos (Mayor -> Negativo)
+                    # 2. PJ (Mayor -> Negativo)
+                    # 3. Error (Menor -> Positivo tal cual)
+                    # 4. Anticipación (Mayor -> Negativo)
+                    return (-pts, -partidos_jug, avg_error, -avg_ant)
 
                 # Ordenar
-                ranking_ordenado = sorted(ids_usuarios, key=get_sort_key, reverse=True)
+                ranking_ordenado = sorted(ids_usuarios, key=get_sort_key)
                 
                 # Asignar puestos
                 mapa_puestos = {}
@@ -684,7 +694,7 @@ class BaseDeDatos:
                         prev_key = current_key
                     mapa_puestos[uid] = puesto_actual
 
-                # Guardar en historial
+                # Guardar historial
                 for usuario_target in usuarios_seleccionados:
                     target_id = next((k for k, v in mapa_nombres.items() if v == usuario_target), None)
                     if target_id:
@@ -694,7 +704,9 @@ class BaseDeDatos:
             return len(partidos), total_usuarios, historial_grafico
 
         except Exception as e:
-            logger.error(f"Error evolución: {e}")
+            # logger.error(f"Error evolución: {e}") 
+            # Si no usas logger, solo imprime o ignora
+            print(f"Error evolución: {e}")
             return 0, 0, {}
         finally:
             if cursor: cursor.close()
@@ -1434,76 +1446,56 @@ class BaseDeDatos:
 
     def obtener_ranking_mayores_errores(self, usuario=None, edicion_id=None, anio=None):
         """
-        Obtiene el listado de los pronósticos con mayor error absoluto.
-        Trae un límite ampliado (50) para procesar el Top 10 con empates en la aplicación.
+        Devuelve el TOP de pronósticos con mayor error absoluto.
+        Adaptado al esquema: JOIN con rivales, fecha_hora, etc.
         """
-        conexion = None
-        cursor = None
-        try:
-            conexion = self.abrir()
-            cursor = conexion.cursor()
+        conexion = self.abrir()
+        if not conexion: return []
+        cursor = conexion.cursor()
 
-            params = []
-            filtro_sql = ""
+        # Condición para partidos terminados
+        filtros = ["p.goles_independiente IS NOT NULL"] 
+        params = []
 
-            # Filtros Opcionales
-            if usuario:
-                filtro_sql += " AND u.username = %s "
-                params.append(usuario)
-            
-            if edicion_id is not None:
-                filtro_sql += " AND p.edicion_id = %s "
-                params.append(edicion_id)
-            elif anio is not None:
-                filtro_sql += " AND a.numero = %s "
-                params.append(anio)
+        if edicion_id:
+            filtros.append("p.edicion_id = %s")
+            params.append(edicion_id)
+        if anio:
+            filtros.append("YEAR(p.fecha_hora) = %s")
+            params.append(anio)
+        if usuario:
+            filtros.append("u.username = %s")
+            params.append(usuario)
 
-            sql = f"""
+        where_clause = " AND ".join(filtros)
+
+        # SQL Corregido
+        sql = f"""
             SELECT 
-                u.username,
-                r.nombre,
-                p.fecha_hora,
-                pr.fecha_prediccion,
-                pr.pred_goles_independiente,
-                pr.pred_goles_rival,
-                p.goles_independiente,
-                p.goles_rival,
-                -- Cálculo del Error Absoluto
-                (ABS(CAST(p.goles_independiente AS SIGNED) - CAST(pr.pred_goles_independiente AS SIGNED)) + 
-                 ABS(CAST(p.goles_rival AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED))) as error_absoluto
-
+                u.username, 
+                r.nombre as rival,          -- JOIN con rivales para sacar el nombre
+                p.fecha_hora,               -- Corregido: fecha_hora
+                pr.fecha_prediccion,        -- Corregido: fecha_prediccion
+                pr.pred_goles_independiente,-- Corregido
+                pr.pred_goles_rival,        -- Corregido
+                p.goles_independiente,      -- Corregido
+                p.goles_rival,              -- Corregido
+                (ABS(p.goles_independiente - pr.pred_goles_independiente) + ABS(p.goles_rival - pr.pred_goles_rival)) as error_abs
             FROM pronosticos pr
             JOIN partidos p ON pr.partido_id = p.id
+            JOIN rivales r ON p.rival_id = r.id  -- JOIN necesario
             JOIN usuarios u ON pr.usuario_id = u.id
-            JOIN rivales r ON p.rival_id = r.id
-            JOIN ediciones e ON p.edicion_id = e.id
-            JOIN anios a ON e.anio_id = a.id
-            
-            INNER JOIN (
-                SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
-                FROM pronosticos
-                GROUP BY usuario_id, partido_id
-            ) latest ON pr.usuario_id = latest.usuario_id AND pr.partido_id = latest.partido_id AND pr.fecha_prediccion = latest.max_fecha
-
-            WHERE 
-                p.goles_independiente IS NOT NULL
-                {filtro_sql}
-            
-            ORDER BY error_absoluto DESC, p.fecha_hora DESC
-            LIMIT 50 
-            """
-            # LIMIT 50: Traemos suficientes para calcular el Top 10 + empates en Python
-            
-            cursor.execute(sql, tuple(params))
-            return cursor.fetchall()
-
-        except Exception as e:
-            logger.error(f"Error obteniendo mayores errores: {e}")
-            return []
-        finally:
-            if cursor: cursor.close()
-            if conexion: conexion.close()
-            
+            WHERE {where_clause}
+            ORDER BY error_abs DESC, p.fecha_hora DESC
+            LIMIT 50
+        """
+        
+        cursor.execute(sql, tuple(params))
+        datos = cursor.fetchall()
+        cursor.close()
+        conexion.close()
+        return datos
+           
     def obtener_estadisticas_firmeza_pronostico(self, usuario, edicion_id=None, anio=None):
         """
         Calcula estadísticas sobre la cantidad de veces que el usuario cambió su pronóstico
@@ -1802,172 +1794,104 @@ class BaseDeDatos:
 
     def obtener_ranking(self, edicion_id=None, anio=None):
         """
-        Calcula el ranking de usuarios.
-        
-        LÓGICA DE ANTICIPACIÓN (Actualizada):
-        - Solo considera partidos del PASADO (fecha < ahora).
-        - Los partidos futuros NO cuentan (ni suman ni restan).
-        - Si un partido del pasado no se pronosticó, cuenta como 0 segundos.
-        - Si no hay partidos jugados en el torneo, el promedio es 0 para todos.
+        Ranking Definitivo:
+        1. Solo partidos FINALIZADOS (fecha < NOW y goles cargados).
+        2. Solo el ÚLTIMO pronóstico de cada usuario (evita duplicados por ediciones).
+        3. Cálculo de puntos con la variable global PUNTOS.
         """
-        conexion = None
-        cursor = None
-        try:
-            conexion = self.abrir()
-            cursor = conexion.cursor() 
+        conexion = self.abrir()
+        if not conexion:
+            return []
+        
+        cursor = conexion.cursor()
+        
+        filtro_sql = ""
+        params = []
+        
+        if edicion_id:
+            filtro_sql += " AND p.edicion_id = %s"
+            params.append(edicion_id)
+        if anio:
+            filtro_sql += " AND YEAR(p.fecha_hora) = %s"
+            params.append(anio)
 
-            params = []
-            
-            # --- FILTROS DE EDICIÓN O AÑO ---
-            condicion_filtro = ""
-            if edicion_id is not None:
-                condicion_filtro = " AND e.id = %s "
-                params.append(edicion_id)
-            elif anio is not None:
-                condicion_filtro = " AND a.numero = %s "
-                params.append(anio)
-            
-            # SQL Scope Jugados (Para Puntos y Efectividad)
-            sql_scope_jugados = f"""
-                SELECT p.id, p.goles_independiente, p.goles_rival, p.fecha_hora
-                FROM partidos p
-                JOIN ediciones e ON p.edicion_id = e.id 
-                JOIN anios a ON e.anio_id = a.id 
-                WHERE p.goles_independiente IS NOT NULL {condicion_filtro}
-            """
-
-            # ---------------------------------------------------------------
-            # QUERY PRINCIPAL
-            # ---------------------------------------------------------------
-            sql = f"""
+        # LÓGICA SQL:
+        # Se agrega un INNER JOIN con una subconsulta 'ultimos'
+        # Esta subconsulta obtiene el MAX(id) agrupado por usuario y partido.
+        # Al unir 'pronosticos' con 'ultimos', filtramos todas las filas viejas.
+        
+        sql = f"""
             SELECT 
-                u.username,
+                u.username,                                                     -- 0
                 
-                -- [1] Puntos Totales
+                -- 1. TOTAL PUNTOS
                 COALESCE(SUM(
-                    (CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END) +
+                    (CASE WHEN SIGN(CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED)) = 
+                               SIGN(CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) 
+                          THEN {PUNTOS} ELSE 0 END) +
                     (CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END) +
                     (CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END)
-                ), 0) AS total,
+                ), 0) as total_puntos,
 
-                -- [2-4] Desglose Puntos
-                COALESCE(SUM(CASE WHEN SIGN(p.goles_independiente - p.goles_rival) = SIGN(pr.pred_goles_independiente - pr.pred_goles_rival) THEN {PUNTOS} ELSE 0 END), 0) AS pts_ganador,
-                COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END), 0) AS pts_cai,
-                COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) AS pts_rival,
+                -- 2. Puntos Resultado
+                COALESCE(SUM(
+                    CASE WHEN SIGN(CAST(p.goles_independiente AS SIGNED) - CAST(p.goles_rival AS SIGNED)) = 
+                              SIGN(CAST(pr.pred_goles_independiente AS SIGNED) - CAST(pr.pred_goles_rival AS SIGNED)) 
+                         THEN {PUNTOS} ELSE 0 END
+                ), 0) as pts_resultado,
 
-                -- [5] Cantidad de partidos jugados (para efectividad)
-                COUNT(p.id) as cant_pronosticos,
-                
-                -- [6] ANTICIPACIÓN PROMEDIO (SOLO PASADO)
-                COALESCE(MAX(anti.promedio_segundos), 0) as avg_anticipacion_segundos,
-                
-                -- [7] Promedio de intentos
-                COALESCE(MAX(att.total_intentos), 0) as total_intentos_raw,
+                -- 3. Puntos Goles CAI
+                COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente THEN {PUNTOS} ELSE 0 END), 0) as pts_cai,
 
-                -- [8] Aciertos Exactos
-                COALESCE(SUM(CASE WHEN p.goles_independiente = pr.pred_goles_independiente AND p.goles_rival = pr.pred_goles_rival THEN 1 ELSE 0 END), 0) as cant_exactos
+                -- 4. Puntos Goles Rival
+                COALESCE(SUM(CASE WHEN p.goles_rival = pr.pred_goles_rival THEN {PUNTOS} ELSE 0 END), 0) as pts_rival,
+
+                -- 5. Partidos Jugados
+                COUNT(pr.id) as partidos_jugados,
+
+                -- 6. Anticipación Promedio
+                AVG(TIMESTAMPDIFF(SECOND, pr.fecha_prediccion, p.fecha_hora)) as ant_avg,
+
+                -- 7. Error Promedio
+                AVG(
+                    ABS(p.goles_independiente - pr.pred_goles_independiente) + 
+                    ABS(p.goles_rival - pr.pred_goles_rival)
+                ) as error_promedio
 
             FROM usuarios u
+            JOIN pronosticos pr ON u.id = pr.usuario_id
             
-            -- JOIN 1: ANTICIPACIÓN (Lógica Estricta: Solo Pasado)
-            LEFT JOIN (
-                SELECT 
-                    u_sub.id as uid,
-                    SUM(
-                        CASE 
-                            -- Si pronosticó, calculamos la diferencia
-                            WHEN pr_all.fecha_prediccion IS NOT NULL THEN TIMESTAMPDIFF(SECOND, pr_all.fecha_prediccion, p_all.fecha_hora)
-                            -- Si NO pronosticó y es partido pasado, penalización máxima (0 segundos de anticipación)
-                            ELSE 0 
-                        END
-                    ) / COUNT(p_all.id) as promedio_segundos
-                FROM usuarios u_sub
-                -- Cruzamos usuarios con TODOS los partidos del filtro que ya sean PASADO
-                CROSS JOIN partidos p_all
-                JOIN ediciones e ON p_all.edicion_id = e.id
-                JOIN anios a ON e.anio_id = a.id
-                
-                -- Unimos con el ÚLTIMO pronóstico disponible
-                LEFT JOIN (
-                    SELECT p1.usuario_id, p1.partido_id, p1.fecha_prediccion
-                    FROM pronosticos p1
-                    INNER JOIN (
-                        SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
-                        FROM pronosticos
-                        GROUP BY usuario_id, partido_id
-                    ) p2 ON p1.usuario_id = p2.usuario_id 
-                        AND p1.partido_id = p2.partido_id 
-                        AND p1.fecha_prediccion = p2.max_fecha
-                ) pr_all ON u_sub.id = pr_all.usuario_id AND p_all.id = pr_all.partido_id
-                
-                WHERE 
-                    1=1 {condicion_filtro} -- Filtro torneo/año
-                    AND p_all.fecha_hora < DATE_SUB(NOW(), INTERVAL 3 HOUR) -- SOLO PARTIDOS DEL PASADO
-                
-                GROUP BY u_sub.id
-            ) anti ON u.id = anti.uid
-
-            -- JOIN 2: PUNTOS (Solo Partidos Jugados y con Resultado)
-            LEFT JOIN (
-                SELECT p1.usuario_id, p1.partido_id, p1.pred_goles_independiente, p1.pred_goles_rival
-                FROM pronosticos p1
-                INNER JOIN (
-                    SELECT usuario_id, partido_id, MAX(fecha_prediccion) as max_fecha
-                    FROM pronosticos
-                    GROUP BY usuario_id, partido_id
-                ) p2 ON p1.usuario_id = p2.usuario_id 
-                    AND p1.partido_id = p2.partido_id 
-                    AND p1.fecha_prediccion = p2.max_fecha
-            ) pr ON u.id = pr.usuario_id
+            -- FILTRO CLAVE: SOLO EL ÚLTIMO PRONÓSTICO
+            INNER JOIN (
+                SELECT MAX(id) as max_id
+                FROM pronosticos
+                GROUP BY usuario_id, partido_id
+            ) ultimos ON pr.id = ultimos.max_id
             
-            LEFT JOIN ({sql_scope_jugados}) p ON pr.partido_id = p.id
+            JOIN partidos p ON pr.partido_id = p.id
             
-            -- JOIN 3: INTENTOS
-            LEFT JOIN (
-                SELECT pr2.usuario_id, COUNT(*) as total_intentos
-                FROM pronosticos pr2
-                JOIN ({sql_scope_jugados}) p_scope ON pr2.partido_id = p_scope.id
-                GROUP BY pr2.usuario_id
-            ) att ON u.id = att.usuario_id
-            
-            GROUP BY u.id, u.username
+            WHERE p.goles_independiente IS NOT NULL 
+              AND p.goles_rival IS NOT NULL
+              AND p.fecha_hora < NOW()
+            {filtro_sql}
+            GROUP BY u.id
             ORDER BY 
-                total DESC,
-                cant_pronosticos DESC,
-                avg_anticipacion_segundos DESC, 
-                (COALESCE(MAX(att.total_intentos), 0) / NULLIF(COUNT(p.id), 0)) ASC;
-            """
-            
-            # Parametros x3: 1 para Anti, 1 para Puntos, 1 para Intentos
-            cursor.execute(sql, tuple(params * 3))
-            filas = cursor.fetchall()
-            
-            resultados_procesados = []
-            for row in filas:
-                cant_pronosticos = row[5]
-                total_intentos = row[7]
-                cant_exactos = row[8]
-                
-                if cant_pronosticos > 0:
-                    promedio_intentos = total_intentos / cant_pronosticos
-                    efectividad = (cant_exactos / cant_pronosticos) * 100
-                else:
-                    promedio_intentos = 0
-                    efectividad = 0.0
-                
-                lista_row = list(row[:7])
-                lista_row.append(promedio_intentos) 
-                lista_row.append(efectividad)
-                resultados_procesados.append(lista_row)
-                
-            return resultados_procesados
-
+                total_puntos DESC,
+                partidos_jugados DESC,
+                error_promedio ASC,
+                ant_avg DESC
+        """
+        
+        try:
+            cursor.execute(sql, tuple(params))
+            ranking = cursor.fetchall()
         except Exception as e:
-            logger.error(f"Error calculando ranking en BD: {e}")
-            return []
-        finally:
-            if cursor: cursor.close()
-            if conexion: conexion.close()
+            print(f"Error SQL Ranking: {e}")
+            ranking = []
+        
+        cursor.close()
+        conexion.close()
+        return ranking
 
     def obtener_indice_optimismo_pesimismo(self, edicion_id=None, anio=None):
         """
@@ -2272,6 +2196,53 @@ class BaseDeDatos:
         finally:
             if cursor: cursor.close()
             if conexion: conexion.close()
+    
+    def obtener_ranking_estabilidad(self, edicion_id=None, anio=None):
+        """
+        Calcula el promedio de pronósticos por partido (Estabilidad)
+        considerando ÚNICAMENTE partidos terminados (goles cargados).
+        Fórmula: Total de filas en 'pronosticos' para partidos jugados / Cantidad de partidos jugados distintos.
+        """
+        conexion = self.abrir()
+        if not conexion: return []
+        cursor = conexion.cursor()
+
+        # Filtro base: Solo partidos que tienen resultado cargado (goles_independiente IS NOT NULL)
+        filtros = ["p.goles_independiente IS NOT NULL"] 
+        params = []
+
+        if edicion_id:
+            filtros.append("p.edicion_id = %s")
+            params.append(edicion_id)
+        if anio:
+            filtros.append("YEAR(p.fecha_hora) = %s")
+            params.append(anio)
+
+        where_clause = " AND ".join(filtros)
+
+        sql = f"""
+            SELECT 
+                u.username, 
+                -- Cálculo: Total Versiones / Total Partidos Únicos
+                COUNT(pr.id) / NULLIF(COUNT(DISTINCT pr.partido_id), 0) as promedio_cambios
+            FROM usuarios u
+            JOIN pronosticos pr ON u.id = pr.usuario_id
+            JOIN partidos p ON pr.partido_id = p.id
+            WHERE {where_clause}
+            GROUP BY u.id
+            ORDER BY u.username ASC
+        """
+        
+        try:
+            cursor.execute(sql, tuple(params))
+            datos = cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Error en ranking estabilidad: {e}")
+            datos = []
+            
+        cursor.close()
+        conexion.close()
+        return datos
             
     def actualizar_email_usuario(self, username, nuevo_email):
         """Actualiza el correo electrónico del usuario."""

@@ -1033,34 +1033,55 @@ El Sistema.
             ft.DataColumn(ft.Container(content=ft.Text("Puntos", color="green", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center), numeric=True, on_sort=self._ordenar_tabla_pronosticos),
             ft.DataColumn(ft.Container(content=ft.Text("Error\nabsoluto", color="red", weight=ft.FontWeight.BOLD, text_align="center"), width=80, alignment=ft.alignment.center), numeric=True, on_sort=self._ordenar_tabla_pronosticos)
         ]
-        ancho_usuario = 130 
+        ancho_usuario = 140
         columnas_estadisticas = [
-            # 1. Puesto: Aumentado a 60 y TextAlign CENTER explícito
-            ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=60, alignment=ft.alignment.center)), 
-            # 2. Usuario
+            # 1. Puesto: Sin color de fondo
+            ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=50, alignment=ft.alignment.center)), 
+            
+            # ... (Columnas del medio quedan igual) ...
             ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center)), 
-            # 3. Puntos Totales: Reducido a 80 (Sobra espacio)
-            ft.DataColumn(ft.Container(content=ft.Text("Puntos\ntotales", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center)), 
-            # 4. Pts CAI: Reducido a 95
-            ft.DataColumn(ft.Container(content=ft.Text("Pts.\ngoles CAI", color="white", text_align=ft.TextAlign.CENTER), width=95, alignment=ft.alignment.center)), 
-            # 5. Pts Rival: Reducido a 95
-            ft.DataColumn(ft.Container(content=ft.Text("Pts.\ngoles rival", color="white", text_align=ft.TextAlign.CENTER), width=95, alignment=ft.alignment.center)), 
-            # 6. Pts Resultado: Reducido a 95
-            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nresultado", color="white", text_align=ft.TextAlign.CENTER, tooltip="Puntos por acertar Gana/Empata/Pierde"), width=95, alignment=ft.alignment.center)), 
-            # 7. PJ: Reducido a 85
-            ft.DataColumn(ft.Container(content=ft.Text("Partidos\njugados", color="cyan", text_align=ft.TextAlign.CENTER), width=85, alignment=ft.alignment.center)), 
-            # 8. Error: Reducido a 95
-            ft.DataColumn(ft.Container(content=ft.Text("Error\npromedio", color="red", text_align=ft.TextAlign.CENTER, tooltip="Promedio de error absoluto de goles"), width=95, alignment=ft.alignment.center)),
-            # 9. Anticipación: Aumentado a 190 para centrar holgadamente
+            ft.DataColumn(ft.Container(content=ft.Text("Puntos\ntotales", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=75, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\ngoles CAI", color="white", text_align=ft.TextAlign.CENTER), width=75, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\ngoles rival", color="white", text_align=ft.TextAlign.CENTER), width=75, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Pts.\nresultado", color="white", text_align=ft.TextAlign.CENTER, tooltip="Puntos por acertar Gana/Empata/Pierde"), width=75, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Partidos\njugados", color="cyan", text_align=ft.TextAlign.CENTER), width=70, alignment=ft.alignment.center)), 
+            ft.DataColumn(ft.Container(content=ft.Text("Error\npromedio", color="red", text_align=ft.TextAlign.CENTER, tooltip="Promedio de error absoluto de goles"), width=80, alignment=ft.alignment.center)),
+            
+            # 9. Anticipación: Sin color de fondo
             ft.DataColumn(ft.Container(content=ft.Text("Anticipación\npromedio", color="cyan", text_align=ft.TextAlign.CENTER), width=190, alignment=ft.alignment.center)), 
         ]
         columnas_copas = [ft.DataColumn(ft.Container(content=ft.Text("Puesto", color="white", weight=ft.FontWeight.BOLD), width=60, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Usuario", color="white", weight=ft.FontWeight.BOLD), width=ancho_usuario, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Torneos ganados", color="yellow", weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER), width=120, alignment=ft.alignment.center))]
         columnas_rivales = [ft.DataColumn(ft.Container(content=ft.Text("Nombre", color="white", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center)), ft.DataColumn(ft.Container(content=ft.Text("Otro nombre", color="cyan", weight=ft.FontWeight.BOLD), width=250, alignment=ft.alignment.center))]
-
         # --- DEFINICIÓN DE TABLAS ---
-        # --- DEFINICIÓN DE TABLAS ---
-        self.tabla_estadisticas_header = ft.DataTable(width=1020, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=10, columns=columnas_estadisticas, rows=[])
-        self.tabla_estadisticas = ft.DataTable(width=1020, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=10, columns=columnas_estadisticas, rows=[])
+        self.tabla_estadisticas_header = ft.DataTable(
+            width=910, 
+            horizontal_margin=0, # <--- ESTO ELIMINA EL MARGEN INVISIBLE
+            bgcolor="#2D2D2D", 
+            border=ft.border.all(1, "white10"), 
+            border_radius=ft.border_radius.only(top_left=8, top_right=8), 
+            vertical_lines=ft.border.BorderSide(1, "white10"), 
+            horizontal_lines=ft.border.BorderSide(1, "white10"), 
+            heading_row_color="black", 
+            heading_row_height=70, 
+            data_row_max_height=0, 
+            column_spacing=10, 
+            columns=columnas_estadisticas, 
+            rows=[]
+        )
+        self.tabla_estadisticas = ft.DataTable(
+            width=910, 
+            horizontal_margin=0, # <--- ESTO ELIMINA EL MARGEN INVISIBLE
+            bgcolor="#2D2D2D", 
+            border=ft.border.all(1, "white10"), 
+            border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), 
+            vertical_lines=ft.border.BorderSide(1, "white10"), 
+            horizontal_lines=ft.border.BorderSide(1, "white10"), 
+            heading_row_height=0, 
+            data_row_max_height=60, 
+            column_spacing=10, 
+            columns=columnas_estadisticas, 
+            rows=[]
+        )
         self.tabla_copas_header = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(top_left=8, top_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_color="black", heading_row_height=70, data_row_max_height=0, column_spacing=20, columns=columnas_copas, rows=[])
         self.tabla_copas = ft.DataTable(width=400, bgcolor="#2D2D2D", border=ft.border.all(1, "white10"), border_radius=ft.border_radius.only(bottom_left=8, bottom_right=8), vertical_lines=ft.border.BorderSide(1, "white10"), horizontal_lines=ft.border.BorderSide(1, "white10"), heading_row_height=0, data_row_max_height=60, column_spacing=20, columns=columnas_copas, rows=[])
         
@@ -2919,13 +2940,13 @@ El Sistema.
         threading.Thread(target=_cargar, daemon=True).start()
 
     def _abrir_modal_cambios_pronostico(self, e):
+        # Copia todo el inicio de la función original, solo cambiamos la sub-función _cargar:
+
+        """ 
+        Muestra la tabla de 'Estabilidad de Pronósticos'. 
+        Clasificación basada en la cantidad promedio de pronósticos por partido (solo terminados).
         """
-        Muestra la tabla de 'Estabilidad de Pronósticos'.
-        Clasificación basada en la cantidad promedio de pronósticos por partido.
-        Ordenada alfabéticamente por usuario.
-        """
-        
-        # Título dinámico
+        # --- Título y Loading (Igual que antes) ---
         titulo = "Estadísticas de Estabilidad"
         if self.filtro_ranking_nombre: 
              titulo = f"Estabilidad ({self.filtro_ranking_nombre})"
@@ -2944,7 +2965,7 @@ El Sistema.
                 ft.Container(height=20)
             ],
             height=150,
-            width=600, # Ajustado el ancho al tener una columna menos
+            width=600,
             scroll=None
         )
         
@@ -2955,33 +2976,20 @@ El Sistema.
             time.sleep(0.5)
             bd = BaseDeDatos()
             
-            # 1. VALIDACIÓN: Verificar si hay datos del PASADO
-            partidos_jugados = bd.obtener_partidos(
-                self.usuario_actual, 
-                filtro_tiempo='jugados', 
-                edicion_id=self.filtro_ranking_edicion_id
-            )
-            datos_ranking = bd.obtener_ranking(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
+            # 1. Llamada a la NUEVA función específica
+            # Retorna [(Username, Promedio), ...]
+            datos_estabilidad = bd.obtener_ranking_estabilidad(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
             
-            datos_validos = False
-            if partidos_jugados:
-                for row in datos_ranking:
-                    # row[7] es el promedio de intentos (calculado solo con partidos jugados)
-                    if row[7] and float(row[7]) > 0: 
-                        datos_validos = True
-                        break
-            
-            if not partidos_jugados and not datos_validos:
+            if not datos_estabilidad:
                 self.loading_modal.visible = False
                 self.txt_estado_modal.value = ""
-                
                 columna_content.controls = [
                     ft.Text(titulo, size=18, weight="bold", color="white"),
                     ft.Container(height=20),
                     ft.Column([
                         ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color="yellow", size=50),
                         ft.Text("No hay datos históricos", size=16, weight="bold", color="white"),
-                        ft.Text("Se requieren partidos pasados para calcular estos promedios.", size=14, color="white70"),
+                        ft.Text("Se requieren partidos terminados con pronósticos.", size=14, color="white70"),
                     ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
                     ft.Container(height=20),
                     ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_cambios))], alignment=ft.MainAxisAlignment.END)
@@ -2990,23 +2998,23 @@ El Sistema.
                 return
 
             # 2. PROCESAR Y ORDENAR
-            # Orden alfabético por nombre de usuario (row[0])
-            datos_ranking.sort(key=lambda x: x[0].lower())
-
             filas = []
-            for row in datos_ranking:
-                user = row[0]
-                promedio_cambios = row[7] 
-                
-                # Solo mostramos usuarios que hayan participado (promedio > 0)
-                if not promedio_cambios or float(promedio_cambios) == 0:
-                    continue
+            
+            # Ordenamos por estabilidad (menor promedio es mejor/más firme)
+            # x[1] es el promedio. Si es None, lo tratamos como 999
+            datos_estabilidad.sort(key=lambda x: float(x[1]) if x[1] else 999)
 
-                # Formateo de Promedio de Cambios y CLASIFICACIÓN
+            for row in datos_estabilidad:
+                user = row[0]
+                promedio_cambios = row[1]
+                
+                if not promedio_cambios: continue
+                
                 val_cambios = float(promedio_cambios)
                 txt_cambios = f"{val_cambios:.2f}".replace('.', ',')
-
+                
                 # --- LÓGICA DE CLASIFICACIÓN ---
+                # 1.0 = Nunca cambia (1 pronóstico por partido)
                 if val_cambios <= 1.10:
                     estilo = "🧱 Firme"
                     color_estilo = "brown"
@@ -3016,24 +3024,20 @@ El Sistema.
                 elif val_cambios <= 2.50:
                     estilo = "🔄 Cambiante"
                     color_estilo = "blue"
-                else:
+                else: 
                     estilo = "📉 Muy volátil"
                     color_estilo = "red"
 
                 filas.append(ft.DataRow(cells=[
-                    # Celda 1: Usuario
                     ft.DataCell(ft.Container(content=ft.Text(user, weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
-                    # Celda 2: Promedio numérico
                     ft.DataCell(ft.Container(content=ft.Text(txt_cambios, color="white", weight="bold"), width=120, alignment=ft.alignment.center)),
-                    # Celda 3: Clasificación
                     ft.DataCell(ft.Container(content=ft.Text(estilo, color=color_estilo, weight="bold", size=14), width=180, alignment=ft.alignment.center_left)),
                 ]))
 
-            # 3. CONSTRUIR TABLA (Sin columna de anticipación)
             tabla = ft.DataTable(
                 columns=[
                     ft.DataColumn(ft.Container(content=ft.Text("Usuario", weight="bold", color="white"), width=150, alignment=ft.alignment.center_left)),
-                    ft.DataColumn(ft.Container(content=ft.Text("Promedio de\npronósticos", text_align="center", weight="bold", color="white", tooltip="Promedio de veces que guardó pronóstico por partido"), width=120, alignment=ft.alignment.center), numeric=True),
+                    ft.DataColumn(ft.Container(content=ft.Text("Promedio de\npronósticos", text_align="center", weight="bold", color="white", tooltip="Promedio de veces que guardó pronóstico por partido finalizado"), width=120, alignment=ft.alignment.center), numeric=True),
                     ft.DataColumn(ft.Container(content=ft.Text("Perfil", weight="bold", color="white"), width=180, alignment=ft.alignment.center_left)),
                 ],
                 rows=filas,
@@ -3044,7 +3048,7 @@ El Sistema.
                 data_row_max_height=50,
                 data_row_min_height=50
             )
-
+            
             columna_content.height = 400
             columna_content.width = 600
             
@@ -3052,7 +3056,7 @@ El Sistema.
                 ft.Text(titulo, size=18, weight="bold", color="white"),
                 ft.Container(height=10),
                 ft.Container(
-                    height=270,
+                    height=270, 
                     content=ft.Column(
                         controls=[tabla],
                         scroll=ft.ScrollMode.AUTO
@@ -3062,7 +3066,7 @@ El Sistema.
                 ft.Row([ft.ElevatedButton("Cerrar", on_click=lambda e: self.page.close(self.dlg_cambios))], alignment=ft.MainAxisAlignment.END)
             ]
             self.dlg_cambios.update()
-
+            
         threading.Thread(target=_cargar, daemon=True).start()
 
     def _seleccionar_rival_admin(self, id_rival):
@@ -3267,12 +3271,20 @@ El Sistema.
                 datos_ranking = bd.obtener_ranking(self.filtro_ranking_edicion_id, self.filtro_ranking_anio)
                 filas_ranking = []
                 for i, fila in enumerate(datos_ranking, start=1):
+                    # Indices basados en la nueva query SQL de arriba:
+                    # 0:User, 1:Total, 2:Res, 3:Cai, 4:Riv, 5:PJ, 6:Ant, 7:Error
                     user = fila[0]
-                    user_display = f"🏆 {user}" if i == 1 else user
                     total = fila[1]
+                    pts_res = fila[2]
+                    pts_cai = fila[3]
+                    pts_rival = fila[4]
+                    pj = fila[5]
+                    raw_seconds = fila[6] 
+                    raw_error = fila[7]
                     
-                    # Anticipación (índice 6)
-                    raw_seconds = fila[6]
+                    user_display = f"🏆 {user}" if i == 1 else user
+
+                    # --- Procesar Anticipación ---
                     if raw_seconds is not None:
                         val_sec = float(raw_seconds)
                         dias = int(val_sec // 86400)
@@ -3281,55 +3293,47 @@ El Sistema.
                         resto %= 3600
                         minutos = int(resto // 60)
                         segundos = resto % 60
-                        txt_dias = "1 día" if dias == 1 else f"{dias} días"
-                        txt_ant = f"{txt_dias} {horas_disp:02d}:{minutos:02d}:{segundos:05.2f} h"
+                        
+                        if dias > 0:
+                            txt_dias = "1 día" if dias == 1 else f"{dias} días"
+                            txt_ant = f"{txt_dias} {horas_disp:02d}:{minutos:02d}:{segundos:05.2f} h"
+                        else:
+                            txt_ant = f"{horas_disp:02d}:{minutos:02d}:{segundos:05.2f} h"
                     else:
-                        txt_ant = "0 días 00:00:00.00 h"
+                        txt_ant = "00:00:00.00 h"
 
-                    # Error Promedio (Intentamos leer del índice 9 si existe, sino guion)
-                    try:
-                        # Asumiendo que la query devuelve el error en la posición 9
-                        # Si tu BD no lo devuelve, esto mostrará "-"
-                        raw_error = fila[9] 
-                        txt_error = f"{float(raw_error):.2f}".replace('.', ',')
-                        color_error = self._obtener_color_error(raw_error)
-                    except:
+                    # --- Procesar Error ---
+                    if raw_error is not None:
+                        val_error = float(raw_error)
+                        txt_error = f"{val_error:.2f}".replace('.', ',')
+                        if val_error < 1.0: color_error = "#00FF00"
+                        elif val_error < 1.5: color_error = "cyan"
+                        elif val_error < 2.0: color_error = "yellow"
+                        else: color_error = "#FF4444"
+                    else:
                         txt_error = "-"
-                        color_error = "white70"
+                        color_error = "white54"
 
                     color_fila = "#8B0000" if user == self.usuario_seleccionado_ranking else None
                     evento_click = lambda e, u=user: self._seleccionar_fila_ranking(u)
 
                     filas_ranking.append(ft.DataRow(
                         cells=[
-                            # 1. Puesto (60)
-                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight=ft.FontWeight.BOLD, color="white", text_align=ft.TextAlign.CENTER), width=60, alignment=ft.alignment.center, on_click=evento_click)),
-                            # 2. Usuario (130)
-                            ft.DataCell(ft.Container(content=ft.Text(user_display, weight=ft.FontWeight.BOLD, color="white"), width=130, alignment=ft.alignment.center_left, on_click=evento_click)),
-                            # 3. Puntos Totales (80)
-                            ft.DataCell(ft.Container(content=ft.Text(str(total), weight=ft.FontWeight.BOLD, color="yellow", size=16), width=80, alignment=ft.alignment.center, on_click=evento_click)),
-                            # 4. Pts CAI (95)
-                            ft.DataCell(ft.Container(content=ft.Text(str(fila[3]), color="white"), width=95, alignment=ft.alignment.center, on_click=evento_click)),
-                            # 5. Pts Rival (95)
-                            ft.DataCell(ft.Container(content=ft.Text(str(fila[4]), color="white"), width=95, alignment=ft.alignment.center, on_click=evento_click)),
-                            # 6. Pts Resultado (95)
-                            ft.DataCell(ft.Container(content=ft.Text(str(fila[2]), color="white"), width=95, alignment=ft.alignment.center, on_click=evento_click)),
-                            # 7. PJ (85)
-                            ft.DataCell(ft.Container(content=ft.Text(str(fila[5]), color="cyan"), width=85, alignment=ft.alignment.center, on_click=evento_click)),
-                            # 8. Error Promedio (95)
-                            ft.DataCell(ft.Container(content=ft.Text(txt_error, color=color_error, weight="bold"), width=95, alignment=ft.alignment.center, on_click=evento_click)),
-                            # 9. Anticipación (190)
-                            ft.DataCell(ft.Container(
-                                content=ft.Text(txt_ant, color="cyan", size=12, text_align=ft.TextAlign.CENTER), 
-                                width=190, 
-                                alignment=ft.alignment.center, 
-                                on_click=evento_click
-                            )),
+                            ft.DataCell(ft.Container(content=ft.Text(f"{i}º", weight="bold", color="white", text_align=ft.TextAlign.CENTER), width=50, alignment=ft.alignment.center, padding=0, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(user_display, weight="bold", color="white", text_align=ft.TextAlign.CENTER), width=140, alignment=ft.alignment.center, padding=0, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(total), weight="bold", color="yellow", size=16, text_align=ft.TextAlign.CENTER), width=75, alignment=ft.alignment.center, padding=0, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(pts_cai), color="white", text_align=ft.TextAlign.CENTER), width=75, alignment=ft.alignment.center, padding=0, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(pts_rival), color="white", text_align=ft.TextAlign.CENTER), width=75, alignment=ft.alignment.center, padding=0, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(pts_res), color="white", text_align=ft.TextAlign.CENTER), width=75, alignment=ft.alignment.center, padding=0, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(str(pj), color="cyan", text_align=ft.TextAlign.CENTER), width=70, alignment=ft.alignment.center, padding=0, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_error, color=color_error, text_align=ft.TextAlign.CENTER), width=80, alignment=ft.alignment.center, padding=0, on_click=evento_click)),
+                            ft.DataCell(ft.Container(content=ft.Text(txt_ant, color="cyan", size=12, text_align=ft.TextAlign.CENTER), width=190, alignment=ft.alignment.center, padding=0, on_click=evento_click)),
                         ],
                         color=color_fila,
                         data=user 
                     ))
                 self.tabla_estadisticas.rows = filas_ranking
+                self.tabla_estadisticas.update()
 
             # ------------------------------------------
             # 2. COPAS (TORNEOS GANADOS)
@@ -3519,9 +3523,10 @@ El Sistema.
                         color=color_row
                     ))
                 self.tabla_rivales.rows = filas_admin
+                self.page.update()
 
         except Exception as e:
-            self._mostrar_mensaje_general("Error recargando datos", f"No se pudieron recargar los datos: {e}", "error")
+            GestorMensajes.mostrar(self.page, "Error recargando datos", f"{e}", "error")
         
         finally:
             self.loading.visible = False
@@ -3538,6 +3543,8 @@ El Sistema.
                 self._actualizar_botones_pronosticos_visual()
                 
             self.page.update()
+     
+     
             
     def _abrir_modal_racha_record(self, e):
         """Abre la ventana modal con la Racha Récord."""
@@ -4042,9 +4049,14 @@ El Sistema.
         self.btn_generar_grafico.update()
 
     def _generar_grafico_puestos(self, e):
-        """Genera y muestra el gráfico de líneas con el nombre del usuario en el tooltip y título en eje Y."""
+        """Genera y muestra el gráfico de líneas con la evolución histórica real."""
         usuarios_sel = [c.label for c in self.chk_usuarios_grafico if c.value]
         
+        # Validación
+        if not usuarios_sel:
+            GestorMensajes.mostrar(self.page, "Atención", "Selecciona al menos un usuario.", "info")
+            return
+
         edicion_id = None
         for ed in self.cache_ediciones_modal:
             if ed[1] == self.temp_camp_graf and ed[2] == self.temp_anio_graf:
@@ -4053,135 +4065,162 @@ El Sistema.
         
         if not edicion_id: return
 
-        def _tarea():
-            bd = BaseDeDatos()
-            cant_partidos, total_usuarios, historial = bd.obtener_datos_evolucion_puestos(edicion_id, usuarios_sel)
-            
-            if cant_partidos == 0:
-                GestorMensajes.mostrar(self.page, "Info", "No hay datos de partidos jugados.", "info")
-                return
+        # Usamos self.dlg_grafico (o el nombre que tenga tu diálogo selector)
+        dialogo_selector = getattr(self, 'dlg_grafico', None) or getattr(self, 'dlg_selector_grafico', None)
+        
+        if dialogo_selector:
+            loading = ft.ProgressBar(width=200, color="red")
+            dialogo_selector.content = ft.Column(
+                [ft.Text("Procesando historia...", color="white"), loading], 
+                height=100, 
+                alignment=ft.MainAxisAlignment.CENTER
+            )
+            dialogo_selector.actions = [] 
+            dialogo_selector.update()
 
-            # 1. Determinar el rango del eje Y
-            peor_puesto_registrado = 1
-            for puestos in historial.values():
-                if puestos:
-                    peor_puesto_registrado = max(peor_puesto_registrado, max(puestos))
-            
-            altura_eje = peor_puesto_registrado + 1
-            
-            colores = [ft.Colors.CYAN, ft.Colors.AMBER, ft.Colors.PINK, ft.Colors.GREEN]
-            data_series = []
-            
-            # 2. Construir líneas
-            for i, user in enumerate(usuarios_sel):
-                puestos = historial.get(user, [])
+        def _tarea():
+            time.sleep(0.5)
+            try:
+                bd = BaseDeDatos()
+                cant_partidos, total_usuarios, historial = bd.obtener_datos_evolucion_puestos(edicion_id, usuarios_sel)
                 
-                # Punto de inicio (0, 0)
-                puntos_grafico = [ft.LineChartDataPoint(0, 0, tooltip="Inicio")]
+                if dialogo_selector: self.page.close(dialogo_selector)
+
+                if cant_partidos == 0:
+                    GestorMensajes.mostrar(self.page, "Info", "No hay partidos finalizados para graficar.", "info")
+                    return
+
+                # 1. Determinar rango eje Y
+                peor_puesto_registrado = 1
+                for puestos in historial.values():
+                    if puestos:
+                        peor_puesto_registrado = max(peor_puesto_registrado, max(puestos))
                 
-                for idx_partido, puesto in enumerate(puestos):
-                    # Fórmula para invertir visualmente: Arriba el 1, Abajo el mayor.
-                    valor_y = altura_eje - puesto
+                altura_eje = peor_puesto_registrado + 1
+                
+                colores = [
+                    ft.Colors.RED, ft.Colors.WHITE, ft.Colors.CYAN, ft.Colors.AMBER, 
+                    ft.Colors.GREEN, ft.Colors.PURPLE, ft.Colors.ORANGE, ft.Colors.PINK
+                ]
+                data_series = []
+                
+                # 2. Construir líneas
+                for i, user in enumerate(usuarios_sel):
+                    puestos = historial.get(user, [])
+                    puntos_grafico = []
                     
-                    puntos_grafico.append(
-                        ft.LineChartDataPoint(
-                            x=idx_partido + 1, 
-                            y=valor_y,
-                            # Mostrar solo el usuario. Flet pondrá el indicador de color al lado.
-                            tooltip=user 
+                    for idx_partido, puesto in enumerate(puestos):
+                        valor_y = altura_eje - puesto
+                        
+                        puntos_grafico.append(
+                            ft.LineChartDataPoint(
+                                x=idx_partido + 1, 
+                                y=valor_y,
+                                tooltip=f"{user}: {puesto}º"
+                                # radius=4 eliminado
+                            )
+                        )
+                    
+                    if puntos_grafico:
+                        data_series.append(
+                            ft.LineChartData(
+                                data_points=puntos_grafico,
+                                stroke_width=3,
+                                color=colores[i % len(colores)],
+                                curved=False, 
+                                stroke_cap_round=True,
+                                point=True
+                                # title=user  <-- ELIMINADO PORQUE DA ERROR EN TU VERSIÓN
+                            )
+                        )
+
+                # 3. Etiquetas Eje Y
+                labels_y = []
+                rango_puestos = range(1, peor_puesto_registrado + 1)
+                if len(rango_puestos) > 15: 
+                    rango_puestos = range(1, peor_puesto_registrado + 1, 2)
+
+                for p in rango_puestos:
+                    val_y = altura_eje - p
+                    labels_y.append(
+                        ft.ChartAxisLabel(
+                            value=val_y, 
+                            label=ft.Text(f"{p}º", size=12, weight="bold" if p==1 else "normal")
                         )
                     )
-                
-                data_series.append(
-                    ft.LineChartData(
-                        data_points=puntos_grafico,
-                        stroke_width=4,
-                        color=colores[i % len(colores)],
-                        curved=False,
-                        stroke_cap_round=True,
-                        point=True 
-                    )
-                )
 
-            # 3. Etiquetas Eje Y (TODAS)
-            labels_y = [ft.ChartAxisLabel(value=0, label=ft.Text("Inicio", size=10, weight="bold"))]
-            
-            for p in range(1, peor_puesto_registrado + 1):
-                val_y = altura_eje - p 
-                labels_y.append(
-                    ft.ChartAxisLabel(
-                        value=val_y, 
-                        label=ft.Text(f"{p}º", size=14 if p==1 else 12, weight="bold" if p==1 else "normal")
-                    )
-                )
+                # 4. Intervalo Eje X
+                intervalo_x = 1
+                if cant_partidos > 15: intervalo_x = 2
+                if cant_partidos > 30: intervalo_x = 5
 
-            # 4. Intervalo Eje X dinámico
-            intervalo_x = 1
-            if cant_partidos > 15: intervalo_x = 2
-            if cant_partidos > 30: intervalo_x = 5
-
-            # 5. Configuración del Gráfico
-            chart = ft.LineChart(
-                data_series=data_series,
-                border=ft.border.all(1, ft.Colors.WHITE10),
-                # CAMBIO AQUÍ: Agregado título vertical "Puestos"
-                left_axis=ft.ChartAxis(
-                    labels=labels_y,
-                    labels_size=50,
-                    title=ft.Text("Puestos", size=14, italic=True),
-                    title_size=30
-                ),
-                bottom_axis=ft.ChartAxis(
-                    labels_interval=intervalo_x,
-                    title=ft.Text("Partido N°", size=14, italic=True),
-                    labels_size=40,
-                ),
-                tooltip_bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
-                min_y=0,
-                max_y=altura_eje + 0.2, 
-                min_x=0,
-                max_x=cant_partidos, 
-                horizontal_grid_lines=ft.ChartGridLines(interval=1, color=ft.Colors.WHITE10, width=1),
-                expand=True,
-            )
-            
-            # Leyenda (usando len(colores) correctamente)
-            items_leyenda = []
-            for i, user in enumerate(usuarios_sel):
-                items_leyenda.append(
-                    ft.Row([
-                        ft.Container(width=15, height=15, bgcolor=colores[i % len(colores)], border_radius=3),
-                        ft.Text(user, weight="bold", size=16)
-                    ], spacing=5)
-                )
-
-            # --- PANTALLA COMPLETA ---
-            ancho = self.page.width - 50
-            alto = self.page.height - 50
-
-            contenido_final = ft.Container(
-                width=ancho, height=alto,
-                padding=20, bgcolor="#1E1E1E",
-                content=ft.Column([
-                    ft.Row(
-                        controls=[
-                            ft.Text(f"Evolución: {self.temp_camp_graf} {self.temp_anio_graf}", size=24, weight="bold"),
-                            ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_full))
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                # 5. Configurar Gráfico
+                chart = ft.LineChart(
+                    data_series=data_series,
+                    border=ft.border.all(1, ft.Colors.WHITE10),
+                    left_axis=ft.ChartAxis(
+                        labels=labels_y,
+                        title=ft.Text("Posición", size=14, italic=True),
+                        title_size=30
                     ),
-                    ft.Container(content=chart, expand=True, padding=ft.padding.all(20)),
-                    ft.Row(items_leyenda, alignment="center")
-                ])
-            )
-            
-            self.page.close(self.dlg_grafico)
-            
-            self.dlg_grafico_full = ft.AlertDialog(content=contenido_final, modal=True, inset_padding=10)
-            self.page.open(self.dlg_grafico_full)
+                    bottom_axis=ft.ChartAxis(
+                        labels_interval=intervalo_x,
+                        title=ft.Text("Partidos Jugados", size=14, italic=True),
+                        labels_size=30,
+                    ),
+                    tooltip_bgcolor=ft.Colors.with_opacity(0.9, "#1E1E1E"),
+                    min_y=0,
+                    max_y=altura_eje + 0.5, 
+                    min_x=1,
+                    max_x=cant_partidos, 
+                    horizontal_grid_lines=ft.ChartGridLines(interval=1, color=ft.Colors.WHITE10, width=1),
+                    vertical_grid_lines=ft.ChartGridLines(interval=1, color=ft.Colors.WHITE10, width=1),
+                    expand=True,
+                )
+                
+                # Leyenda Personalizada (Ya la teníamos, así que no perdemos info)
+                items_leyenda = []
+                for i, user in enumerate(usuarios_sel):
+                    items_leyenda.append(
+                        ft.Row([
+                            ft.Container(width=15, height=15, bgcolor=colores[i % len(colores)], border_radius=3),
+                            ft.Text(user, weight="bold", size=14, color="white")
+                        ], spacing=5)
+                    )
+
+                # --- PANTALLA COMPLETA ---
+                ancho = self.page.width - 50 if self.page.width else 900
+                alto = self.page.height - 50 if self.page.height else 600
+
+                contenido_final = ft.Container(
+                    width=ancho, height=alto,
+                    padding=20, bgcolor="#1E1E1E", border_radius=10,
+                    content=ft.Column([
+                        ft.Row(
+                            controls=[
+                                ft.Text(f"Evolución: {self.temp_camp_graf} {self.temp_anio_graf}", size=20, weight="bold"),
+                                ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_grafico_full))
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                        ),
+                        ft.Text("Historial partido a partido (1º Puntos > 2º PJ > 3º Error > 4º Anticipación)", size=12, color="white54"),
+                        ft.Divider(),
+                        ft.Container(content=chart, expand=True, padding=ft.padding.only(top=20, right=20)),
+                        ft.Divider(),
+                        ft.Row(items_leyenda, alignment="center", wrap=True)
+                    ])
+                )
+                
+                self.dlg_grafico_full = ft.AlertDialog(content=contenido_final, modal=True, content_padding=0, bgcolor=ft.Colors.TRANSPARENT)
+                self.page.open(self.dlg_grafico_full)
+
+            except Exception as ex:
+                if dialogo_selector: self.page.close(dialogo_selector)
+                GestorMensajes.mostrar(self.page, "Error", f"Error generando gráfico: {ex}", "error")
+                print(f"Error en hilo gráfico de puestos: {ex}")
 
         threading.Thread(target=_tarea, daemon=True).start()
-
+   
     def _abrir_selector_torneo_ranking(self, e):
         # --- 1. LÓGICA DE TOGGLE ---
         # Si ya hay un torneo filtrado, lo quitamos
@@ -5382,7 +5421,10 @@ El Sistema.
             return "white"
         
     def _generar_tabla_mayores_errores(self, e):
-        """Genera la tabla con Scroll corregido: Se expande correctamente para activar la barra."""
+        """
+        Genera la tabla de mayores errores (Top Payasos).
+        Usa directamente GestorMensajes y la nueva estructura SQL.
+        """
         
         # 1. Filtros
         edicion_id = None
@@ -5394,197 +5436,176 @@ El Sistema.
         elif self.temp_anio_err:
             anio_filtro = self.temp_anio_err
 
-        # 2. Spinner
+        # 2. Spinner de carga
         loading = ft.ProgressBar(width=200, color="red")
-        self.dlg_selector_errores.content = ft.Column([ft.Text("Procesando datos..."), loading], height=100, alignment=ft.MainAxisAlignment.CENTER)
+        self.dlg_selector_errores.content = ft.Column(
+            [ft.Text("Procesando datos...", color="white"), loading], 
+            height=100, 
+            alignment=ft.MainAxisAlignment.CENTER
+        )
         self.dlg_selector_errores.actions = []
         self.dlg_selector_errores.update()
 
         def _tarea():
             time.sleep(0.5)
-            bd = BaseDeDatos()
-            datos = bd.obtener_ranking_mayores_errores(usuario=None, edicion_id=edicion_id, anio=anio_filtro)
-            
-            # --- LÓGICA DE DATOS ---
-            filas_filtradas = []
-            if datos:
-                limite_ranking = 10
-                valor_corte = -1
-                for i, fila in enumerate(datos):
-                    error_actual = fila[8]
-                    if i < limite_ranking:
-                        filas_filtradas.append(fila)
-                        if i == (limite_ranking - 1): valor_corte = error_actual
-                    elif error_actual == valor_corte:
-                        filas_filtradas.append(fila)
-                    else: break
-            
-            # --- CÁLCULO DE ANCHOS ---
-            # Columna "Error" en 100px para que la barra de scroll tenga lugar visualmente
-            w_cols = [130, 140, 100, 100, 60, 60, 100] 
-            w_spacing = 10
-            
-            # Ancho neto de la tabla
-            ancho_tabla_neto = sum(w_cols) + (w_spacing * (len(w_cols) - 1))
-            ancho_total = ancho_tabla_neto # Sin márgenes extra
-
-            # Estilos de borde
-            borde_gris = ft.border.all(1, "white10")
-            borde_inferior = ft.border.only(bottom=ft.border.BorderSide(1, "white10"))
-            borde_derecho = ft.border.only(right=ft.border.BorderSide(1, "white10"))
-
-            # --- 1. CONSTRUCCIÓN DEL ENCABEZADO (FIJO) ---
-            titulos = ["Usuario", "Rival", "F. Partido", "F. Pronos.", "Pron.", "Res.", "Error"]
-            celdas_header = []
-            for i, titulo in enumerate(titulos):
-                estilo_borde = borde_derecho if i < len(titulos) - 1 else None
+            try:
+                bd = BaseDeDatos()
+                datos = bd.obtener_ranking_mayores_errores(usuario=None, edicion_id=edicion_id, anio=anio_filtro)
                 
-                celdas_header.append(
-                    ft.Container(
-                        content=ft.Text(titulo, weight="bold", size=14, color="white"),
-                        width=w_cols[i],
-                        alignment=ft.alignment.center,
-                        border=estilo_borde
-                    )
-                )
-            
-            header_row = ft.Container(
-                content=ft.Row(
-                    controls=celdas_header,
-                    spacing=w_spacing,
-                    alignment=ft.MainAxisAlignment.START
-                ),
-                bgcolor="black",
-                height=60,
-                border=borde_inferior,
-                padding=0,
-                width=ancho_total
-            )
+                # --- LÓGICA DE FILTRADO (Top 10 + Empates) ---
+                filas_filtradas = []
+                if datos:
+                    limite_ranking = 10
+                    valor_corte = -1
+                    for i, fila in enumerate(datos):
+                        error_actual = fila[8] # Índice 8 es el error absoluto
+                        if i < limite_ranking:
+                            filas_filtradas.append(fila)
+                            if i == (limite_ranking - 1): valor_corte = error_actual
+                        elif error_actual == valor_corte:
+                            filas_filtradas.append(fila)
+                        else: break
+                
+                # --- CÁLCULO DE ANCHOS ---
+                w_cols = [130, 140, 100, 100, 60, 60, 100] 
+                w_spacing = 10
+                ancho_tabla_neto = sum(w_cols) + (w_spacing * (len(w_cols) - 1))
+                
+                # Bordes
+                borde_gris = ft.border.all(1, "white10")
+                borde_inferior = ft.border.only(bottom=ft.border.BorderSide(1, "white10"))
+                borde_derecho = ft.border.only(right=ft.border.BorderSide(1, "white10"))
 
-            # --- 2. CONSTRUCCIÓN DEL CUERPO (SCROLLEABLE) ---
-            rows_controls = []
-            previous_error = None
-
-            for fila in filas_filtradas:
-                user = fila[0]
-                rival = fila[1]
-                f_part = fila[2].strftime("%d/%m %H:%M") if fila[2] else "-"
-                f_pron = fila[3].strftime("%d/%m %H:%M") if fila[3] else "-"
-                pc, pr = fila[4], fila[5]
-                rc, rr = fila[6], fila[7]
-                err_abs = fila[8]
-                pron_str = f"{pc}-{pr}"
-                res_str = f"{rc}-{rr}"
-                err_str = f"{int(err_abs)}" if err_abs is not None else "0"
-
-                if previous_error is not None and err_abs == previous_error:
-                    pass 
-                previous_error = err_abs
-
-                color_error = self._obtener_color_error(err_abs)
-
-                celdas_fila = []
-                datos_fila = [
-                    (user, "white", True),
-                    (rival, "white70", False),
-                    (f_part, "white", False),
-                    (f_pron, "cyan", False),
-                    (pron_str, "cyan", True),
-                    (res_str, "yellow", True),
-                    (err_str, color_error, True)
-                ]
-
-                for i, (txt, col, bold) in enumerate(datos_fila):
-                    estilo_borde = borde_derecho if i < len(datos_fila) - 1 else None
-                    size_txt = 16 if i == 6 else (13 if i < 2 else 12)
-                    
-                    celdas_fila.append(
+                # --- 1. ENCABEZADO ---
+                titulos = ["Usuario", "Rival", "F. Partido", "F. Pronos.", "Pron.", "Res.", "Error"]
+                celdas_header = []
+                for i, titulo in enumerate(titulos):
+                    estilo_borde = borde_derecho if i < len(titulos) - 1 else None
+                    celdas_header.append(
                         ft.Container(
-                            content=ft.Text(txt, weight="bold" if bold else "normal", size=size_txt, color=col),
+                            content=ft.Text(titulo, weight="bold", size=14, color="white"),
                             width=w_cols[i],
                             alignment=ft.alignment.center,
                             border=estilo_borde
                         )
                     )
-
-                row_visual = ft.Container(
-                    content=ft.Row(
-                        controls=celdas_fila,
-                        spacing=w_spacing,
-                        alignment=ft.MainAxisAlignment.START
-                    ),
-                    height=50,
-                    border=borde_inferior,
-                    padding=0
+                
+                header_row = ft.Container(
+                    content=ft.Row(controls=celdas_header, spacing=w_spacing, alignment=ft.MainAxisAlignment.START),
+                    bgcolor="black", height=60, border=borde_inferior, padding=0, width=ancho_tabla_neto
                 )
-                rows_controls.append(row_visual)
 
-            body_column = ft.Column(
-                controls=rows_controls,
-                scroll=ft.ScrollMode.AUTO, 
-                expand=True,
-                spacing=0
-            )
+                # --- 2. CUERPO ---
+                rows_controls = []
+                previous_error = None
 
-            # --- 3. ENSAMBLADO FINAL ---
-            tabla_simulada = ft.Container(
-                content=ft.Column(
+                for fila in filas_filtradas:
+                    # Desempaquetado seguro basado en SQL
+                    user = fila[0]
+                    rival = fila[1]
+                    
+                    # Manejo de fechas (datetime o str)
+                    f_part_raw = fila[2]
+                    f_pron_raw = fila[3]
+                    f_part = f_part_raw.strftime("%d/%m %H:%M") if hasattr(f_part_raw, 'strftime') else str(f_part_raw)[:16]
+                    f_pron = f_pron_raw.strftime("%d/%m %H:%M") if hasattr(f_pron_raw, 'strftime') else str(f_pron_raw)[:16]
+                    
+                    pc, pr = fila[4], fila[5] # Predicciones
+                    rc, rr = fila[6], fila[7] # Goles Reales
+                    err_abs = fila[8]
+                    
+                    pron_str = f"{pc}-{pr}"
+                    res_str = f"{rc}-{rr}"
+                    err_str = f"{int(err_abs)}" if err_abs is not None else "0"
+
+                    if previous_error is not None and err_abs == previous_error: pass 
+                    previous_error = err_abs
+
+                    # Color condicional
+                    if err_abs == 0: color_error = "#00FF00"
+                    elif err_abs <= 2: color_error = "cyan"
+                    elif err_abs <= 4: color_error = "yellow"
+                    else: color_error = "#FF4444"
+
+                    celdas_fila = []
+                    datos_fila = [
+                        (user, "white", True),
+                        (rival, "white70", False),
+                        (f_part, "white", False),
+                        (f_pron, "cyan", False),
+                        (pron_str, "cyan", True),
+                        (res_str, "yellow", True),
+                        (err_str, color_error, True)
+                    ]
+
+                    for i, (txt, col, bold) in enumerate(datos_fila):
+                        estilo_borde = borde_derecho if i < len(datos_fila) - 1 else None
+                        size_txt = 16 if i == 6 else (13 if i < 2 else 12)
+                        
+                        celdas_fila.append(
+                            ft.Container(
+                                content=ft.Text(str(txt), weight="bold" if bold else "normal", size=size_txt, color=col),
+                                width=w_cols[i],
+                                alignment=ft.alignment.center,
+                                border=estilo_borde
+                            )
+                        )
+
+                    row_visual = ft.Container(
+                        content=ft.Row(controls=celdas_fila, spacing=w_spacing, alignment=ft.MainAxisAlignment.START),
+                        height=50, border=borde_inferior, padding=0
+                    )
+                    rows_controls.append(row_visual)
+
+                body_column = ft.Column(controls=rows_controls, scroll=ft.ScrollMode.AUTO, expand=True, spacing=0)
+
+                # --- 3. ENSAMBLADO ---
+                tabla_simulada = ft.Container(
+                    content=ft.Column(controls=[header_row, body_column], spacing=0, expand=True),
+                    border=borde_gris, width=ancho_tabla_neto, expand=True
+                )
+
+                contenido_final = ft.Column(
                     controls=[
-                        header_row,
-                        body_column
+                        ft.Row(
+                            controls=[
+                                ft.Text("Ranking de Mayores Errores 🤡", size=20, weight="bold", color="white"),
+                                ft.IconButton(icon=ft.Icons.CLOSE, icon_color="white", on_click=lambda e: self.page.close(self.dlg_tabla_errores))
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        ),
+                        ft.Text("Top 10 (con empates) - Ordenado por error absoluto", size=12, color="white54"),
+                        ft.Divider(color="white24"),
+                        tabla_simulada
                     ],
-                    spacing=0,
-                    expand=True
-                ),
-                border=borde_gris,
-                width=ancho_total,
-                expand=True  # <--- CRUCIAL: ESTO FALTABA PARA ACTIVAR EL SCROLL
-            )
+                    spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER, expand=True
+                )
 
-            contenido_final = ft.Column(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Text("Ranking de Mayores Errores 🤡", size=20, weight="bold"),
-                            ft.IconButton(icon=ft.Icons.CLOSE, on_click=lambda e: self.page.close(self.dlg_tabla_errores))
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    ),
-                    ft.Text("Top 10 (con empates) - Ordenado por error absoluto", size=12, color="white54"),
-                    ft.Divider(),
-                    tabla_simulada
-                ],
-                spacing=10,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                expand=True 
-            )
+                # --- 4. CIERRE Y APERTURA ---
+                self.page.close(self.dlg_selector_errores)
+                
+                alto_pantalla = self.page.height if self.page.height else 700
+                alto_dialogo = int(alto_pantalla - 100)
 
-            # --- 4. DIÁLOGO ADAPTABLE ---
-            alto_pantalla = self.page.height if self.page.height else 700
-            alto_dialogo = int(alto_pantalla - 100)
+                contenedor_dialogo = ft.Container(
+                    content=contenido_final,
+                    width=ancho_tabla_neto + 40,
+                    height=alto_dialogo,
+                    bgcolor="#1E1E1E", padding=20, border_radius=10, alignment=ft.alignment.center
+                )
+                
+                self.dlg_tabla_errores = ft.AlertDialog(
+                    content=contenedor_dialogo, modal=True, content_padding=0, bgcolor=ft.Colors.TRANSPARENT 
+                )
+                self.page.open(self.dlg_tabla_errores)
 
-            contenedor_dialogo = ft.Container(
-                content=contenido_final,
-                width=ancho_total + 40,
-                height=alto_dialogo, 
-                bgcolor="#1E1E1E",
-                padding=20,
-                border_radius=10,
-                alignment=ft.alignment.center
-            )
-
-            self.page.close(self.dlg_selector_errores)
-            
-            self.dlg_tabla_errores = ft.AlertDialog(
-                content=contenedor_dialogo, 
-                modal=True, 
-                content_padding=0,
-                bgcolor=ft.Colors.TRANSPARENT 
-            )
-            self.page.open(self.dlg_tabla_errores)
+            except Exception as ex:
+                self.page.close(self.dlg_selector_errores)
+                # --- CAMBIO: Llamada directa a GestorMensajes ---
+                GestorMensajes.mostrar(self.page, "Error", f"Error al generar tabla: {ex}", "error")
 
         threading.Thread(target=_tarea, daemon=True).start()
-        
+
     # --- Lógica de selección para el modal de Errores (similar a torta pero independiente) ---
     def _sel_torneo_err(self, e):
         nombre = e.control.data
